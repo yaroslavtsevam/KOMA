@@ -67,3 +67,6 @@ web/.env
 /*.txt
 !/requirements.txt
 !/templates/OMD_template.docx
+
+# NetBird instructions
+netbir_instructions.md
