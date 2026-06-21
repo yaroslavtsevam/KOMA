@@ -65,4 +65,5 @@ web/.env
 /*.docx
 /*.pdf
 /*.txt
+!/requirements.txt
 !/templates/OMD_template.docx
