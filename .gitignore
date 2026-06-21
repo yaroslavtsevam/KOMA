@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+bin/
+lib/
+include/
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Secrets, Environment and Configurations
+.env
+.env.*
+!.env.default
+*.env
+secrets*
+credentials*
+*key*
+*password*
+*.db
+*.sqlite
+*.sqlite3
+pipeline.log
+*.log
+
+# Project runtime directories (ignore contents, keep directory structures)
+input/*
+!input/.gitkeep
+processing/*
+!processing/.gitkeep
+results/*
+!results/.gitkeep
+
+# Ignore data/ folder in web (holds SQLite database and local state)
+web/app/data/
+web/.env
+
+# macOS and OS-specific files
+.DS_Store
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Ignore example and test documents in root (to keep repo clean)
+/*.docx
+/*.pdf
+/*.txt
+!/templates/OMD_template.docx

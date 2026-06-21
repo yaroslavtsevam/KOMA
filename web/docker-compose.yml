@@ -1,0 +1,53 @@
+services:
+  web:
+    build:
+      # Build context is the PARENT directory so COPY ../agents etc. works
+      context: ..
+      dockerfile: web/Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      # ── Bind-mount the real project directories so web UI operates on them ──
+      # These are the SAME directories the CLI uses.
+      - ../input:/app/input
+      - ../processing:/app/processing
+      - ../results:/app/results
+      - ../templates:/app/templates
+      - ../main.py:/app/main.py
+      - ../agents:/app/agents
+      - ../tools:/app/tools
+      - ../schemas:/app/schemas
+
+      # ── Persistent data (SQLite DB for user accounts) ──────────────────────
+      - app_data:/app/data
+
+      # ── Hot-reload: mount web app source so edits work without rebuild ─────
+      - ./app:/app/app
+
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_GENAI_USE_VERTEXAI=${GOOGLE_GENAI_USE_VERTEXAI:-FALSE}
+      - DB_PATH=/app/data/users.db
+      - DATA_DIR=/app/data
+      # Project root inside container (where input/, processing/, results/ live)
+      - PROJECT_ROOT=/app
+      # NiceGUI session secret – override in production!
+      - STORAGE_SECRET=${STORAGE_SECRET:-timplan-secret-key-change-me}
+      # Enable NiceGUI hot-reload
+      - NICEGUI_RELOAD=true
+
+    env_file:
+      - .env          # web/.env  (contains GOOGLE_API_KEY etc.)
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  app_data:
+    driver: local
