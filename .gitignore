@@ -28,6 +28,7 @@ share/python-wheels/
 .env
 .env.*
 !.env.default
+!*.env.example
 *.env
 secrets*
 credentials*
