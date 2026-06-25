@@ -6,6 +6,8 @@ services:
       dockerfile: web/Dockerfile
     ports:
       - "8080:8080"
+    networks:
+      - koma-net
     volumes:
       # ── Bind-mount the real project directories so web UI operates on them ──
       # These are the SAME directories the CLI uses.
@@ -51,3 +53,9 @@ services:
 volumes:
   app_data:
     driver: local
+
+networks:
+  koma-net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "1350"
