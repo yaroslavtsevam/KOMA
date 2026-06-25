@@ -8,6 +8,12 @@ The app is started with `python -m app.main` from the Docker WORKDIR (/app).
 import os
 import logging
 from nicegui import app, ui
+from starlette.formparsers import MultiPartParser
+
+# Set spool max size to 50MB to buffer uploads in memory.
+# This prevents slow disk I/O from blocking the asyncio event loop
+# in WSL2/Docker environments, which causes WebSocket timeouts and ClientDisconnects.
+MultiPartParser.spool_max_size = 50 * 1024 * 1024
 
 # ── Bootstrap database ────────────────────────────────────────────────────────
 from .db import init_db
