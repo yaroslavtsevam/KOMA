@@ -9,11 +9,20 @@ import os
 import logging
 from nicegui import app, ui
 from starlette.formparsers import MultiPartParser
+from starlette.requests import ClientDisconnect
+from fastapi import Request
+from fastapi.responses import Response
 
 # Set spool max size to 50MB to buffer uploads in memory.
 # This prevents slow disk I/O from blocking the asyncio event loop
 # in WSL2/Docker environments, which causes WebSocket timeouts and ClientDisconnects.
 MultiPartParser.spool_max_size = 50 * 1024 * 1024
+
+@app.exception_handler(ClientDisconnect)
+async def client_disconnect_handler(request: Request, exc: ClientDisconnect):
+    # Quietly handle ClientDisconnect when the browser closes/aborts the upload request
+    # after receiving the response or on page navigation.
+    return Response(status_code=204)
 
 # ── Bootstrap database ────────────────────────────────────────────────────────
 from .db import init_db
