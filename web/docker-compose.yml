@@ -58,4 +58,4 @@ networks:
   koma-net:
     driver: bridge
     driver_opts:
-      com.docker.network.driver.mtu: "1350"
+      com.docker.network.driver.mtu: "1280"
