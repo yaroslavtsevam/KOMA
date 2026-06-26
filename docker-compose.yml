@@ -1,6 +1,6 @@
 services:
   gluetun:
-    image: huecker.io/qdm12/gluetun:latest
+    image: ghcr.io/qdm12/gluetun:latest
     container_name: gluetun
     cap_add:
       - NET_ADMIN
