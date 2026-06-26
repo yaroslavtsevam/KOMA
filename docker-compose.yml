@@ -29,7 +29,23 @@ services:
       - AMNEZIAWG_H3=${VPN_H3}
       - AMNEZIAWG_H4=${VPN_H4}
       - AMNEZIAWG_PERSISTENT_KEEPALIVE_INTERVAL=${VPN_PERSISTENT_KEEPALIVE}
-      - AMNEZIAWG_MTU=${VPN_MTU:-1280}
+      - AMNEZIAWG_MTU=${VPN_MTU:-1200}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        /gluetun-entrypoint &
+        while true; do
+          if ip link show tun0 >/dev/null 2>&1; then
+            CURRENT_MTU=$$(ip link show tun0 | grep -oE "mtu [0-9]+" | cut -d" " -f2)
+            TARGET_MTU=${VPN_MTU:-1200}
+            if [ "$$CURRENT_MTU" -ne "$$TARGET_MTU" ]; then
+              echo "[MTU Fixer] Changing tun0 MTU from $$CURRENT_MTU to $$TARGET_MTU"
+              ip link set dev tun0 mtu "$$TARGET_MTU"
+            fi
+          fi
+          sleep 1
+        done
     restart: unless-stopped
 
   web:
@@ -96,4 +112,4 @@ networks:
   koma-net:
     driver: bridge
     driver_opts:
-      com.docker.network.driver.mtu: "1280"
+      com.docker.network.driver.mtu: "1350"

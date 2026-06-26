@@ -151,7 +151,7 @@ if [[ ! "$VPN_KEEPALIVE" =~ s$ ]] && [ -n "$VPN_KEEPALIVE" ]; then
 fi
 VPN_MTU=$(get_ini_val "amnezia.config" "Mtu")
 if [ -z "$VPN_MTU" ]; then
-    VPN_MTU="1280"
+    VPN_MTU="1200"
 fi
 
 set_env_var "VPN_ADDRESS" "$VPN_ADDRESS"
