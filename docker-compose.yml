@@ -1,8 +1,7 @@
 services:
   web:
     build:
-      # Build context is the PARENT directory so COPY ../agents etc. works
-      context: ..
+      context: .
       dockerfile: web/Dockerfile
     ports:
       - "8080:8080"
@@ -11,38 +10,34 @@ services:
     networks:
       - koma-net
     volumes:
-      # ── Bind-mount the real project directories so web UI operates on them ──
-      # These are the SAME directories the CLI uses.
-      - ../input:/app/input
-      - ../processing:/app/processing
-      - ../results:/app/results
-      - ../templates:/app/templates
-      - ../main.py:/app/main.py
-      - ../agents:/app/agents
-      - ../tools:/app/tools
-      - ../schemas:/app/schemas
+      # Bind-mount directories from the repository root
+      - ./input:/app/input
+      - ./processing:/app/processing
+      - ./results:/app/results
+      - ./templates:/app/templates
+      - ./main.py:/app/main.py
+      - ./agents:/app/agents
+      - ./tools:/app/tools
+      - ./schemas:/app/schemas
 
-      # ── Persistent data (SQLite DB for user accounts) ──────────────────────
+      # Persistent SQLite DB for users/data
       - app_data:/app/data
 
-      # ── Hot-reload: mount web app source so edits work without rebuild ─────
-      - ./app:/app/app
+      # Hot-reload: mount web app source so edits work immediately without rebuilding
+      - ./web/app:/app/app
 
     environment:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - GOOGLE_GENAI_USE_VERTEXAI=${GOOGLE_GENAI_USE_VERTEXAI:-FALSE}
       - DB_PATH=/app/data/users.db
       - DATA_DIR=/app/data
-      # Project root inside container (where input/, processing/, results/ live)
       - PROJECT_ROOT=/app
-      # NiceGUI session secret – override in production!
       - STORAGE_SECRET=${STORAGE_SECRET:-timplan-secret-key-change-me}
-      # Enable NiceGUI hot-reload
       - NICEGUI_RELOAD=true
       - DOCLING_SERVE_URL=http://docling-serve:5001
 
     env_file:
-      - .env          # web/.env  (contains GOOGLE_API_KEY etc.)
+      - .env
 
     restart: unless-stopped
 

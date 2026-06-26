@@ -41,32 +41,16 @@ if ! docker compose version &> /dev/null; then
     fi
 fi
 
-# 2. Clone or Update KOMA Repository
-REPO_DIR="koma"
-REPO_URL_SSH="git@github.com:yaroslavtsevam/KOMA.git"
-REPO_URL_HTTPS="https://github.com/yaroslavtsevam/KOMA.git"
-
-if [ -d "$REPO_DIR" ]; then
-    echo -e "${YELLOW}Directory '$REPO_DIR' already exists. Updating repository...${NC}"
-    git -C "$REPO_DIR" pull
-else
-    echo -e "${GREEN}Cloning KOMA repository...${NC}"
-    if ! git clone "$REPO_URL_SSH" "$REPO_DIR"; then
-        echo -e "${YELLOW}SSH clone failed or keys not set up. Trying HTTPS...${NC}"
-        git clone "$REPO_URL_HTTPS" "$REPO_DIR"
-    fi
-fi
-
-# 3. Configure web/.env
-ENV_FILE="$REPO_DIR/web/.env"
-ENV_EXAMPLE="$REPO_DIR/web/.env.example"
+# 2. Configure .env file at the root
+ENV_FILE=".env"
+ENV_EXAMPLE="web/.env.example"
 
 if [ ! -f "$ENV_FILE" ]; then
-    echo -e "${GREEN}Creating web/.env configuration...${NC}"
+    echo -e "${GREEN}Creating .env configuration...${NC}"
     if [ -f "$ENV_EXAMPLE" ]; then
         cp "$ENV_EXAMPLE" "$ENV_FILE"
     else
-        echo -e "${YELLOW}Warning: web/.env.example not found in repository. Creating a default configuration...${NC}"
+        echo -e "${YELLOW}Warning: web/.env.example not found. Creating a default configuration...${NC}"
         cat << 'EOF' > "$ENV_FILE"
 # Google Gemini API key (required for the AI extraction pipeline)
 GOOGLE_API_KEY=your_google_api_key_here
@@ -105,13 +89,13 @@ EOF
             sed -i "s/GOOGLE_API_KEY=your_google_api_key_here/GOOGLE_API_KEY=$API_KEY/g" "$ENV_FILE"
         fi
     fi
-    echo -e "${GREEN}web/.env configured successfully.${NC}"
+    echo -e "${GREEN}.env configured successfully at the root.${NC}"
 else
-    echo -e "${YELLOW}web/.env configuration already exists. Skipping env setup.${NC}"
+    echo -e "${YELLOW}.env configuration already exists at the root. Skipping env setup.${NC}"
 fi
 
-# 3.2 Ensure .env.default is present at root (required by Dockerfile)
-DEFAULT_ENV_FILE="$REPO_DIR/.env.default"
+# 3. Ensure .env.default is present at root (required by Dockerfile)
+DEFAULT_ENV_FILE=".env.default"
 if [ ! -f "$DEFAULT_ENV_FILE" ]; then
     echo -e "${YELLOW}Warning: .env.default not found in repository. Creating a default configuration...${NC}"
     cat << 'EOF' > "$DEFAULT_ENV_FILE"
@@ -128,7 +112,7 @@ other_questions_number=15
 EOF
 fi
 
-# 3.3 Hardware Architecture Detection for Docling Service
+# 4. Hardware Architecture Detection for Docling Service
 echo -e "${GREEN}Detecting hardware architecture...${NC}"
 ARCH="cpu"
 
@@ -158,21 +142,21 @@ if [ "$ARCH" = "rocm" ]; then
     fi
 fi
 
-# 4. Start KOMA Service
-echo -e "${GREEN}Starting KOMA service using $DOCKER_COMPOSE_CMD...${NC}"
-COMPOSE_ARGS="-f current.docker-compose.yml"
+# 5. Start KOMA Service
+echo -e "${GREEN}Starting KOMA services using $DOCKER_COMPOSE_CMD...${NC}"
+COMPOSE_ARGS="-f docker-compose.yml"
 if [ "$ARCH" = "nvidia" ]; then
     COMPOSE_ARGS="$COMPOSE_ARGS -f docker-compose.nvidia.yml"
 elif [ "$ARCH" = "rocm" ]; then
     COMPOSE_ARGS="$COMPOSE_ARGS -f docker-compose.rocm.yml"
 fi
 
-$DOCKER_COMPOSE_CMD $COMPOSE_ARGS up -d --build koma
+$DOCKER_COMPOSE_CMD $COMPOSE_ARGS up -d --build
 
 echo -e "${BLUE}======================================================${NC}"
 echo -e "${GREEN} SUCCESS: KOMA has been successfully installed & started!${NC}"
 echo -e "${BLUE}======================================================${NC}"
-echo -e "You can access the KOMA web interface at: ${GREEN}https://koma.durum-project.ru${NC}"
+echo -e "You can access the KOMA web interface at: ${GREEN}http://localhost:8080${NC}"
 echo -e "Default credentials:"
 echo -e "  - Username: ${YELLOW}admin${NC}"
 echo -e "  - Password: ${YELLOW}admin${NC}"
