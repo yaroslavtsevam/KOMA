@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   docling-serve:
     # Uses the locally built ROCm image

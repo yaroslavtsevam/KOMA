@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   docling-serve:
     # Use the official CUDA-accelerated image for docling-serve
