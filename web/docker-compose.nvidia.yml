@@ -3,7 +3,7 @@ version: '3.8'
 services:
   docling-serve:
     # Use the official CUDA-accelerated image for docling-serve
-    image: ghcr.io/docling-project/docling-serve-cu124:v1.18.0
+    image: ghcr.io/docling-project/docling-serve-cu124:latest
     deploy:
       resources:
         reservations:
