@@ -18,16 +18,7 @@ COPY schemas/   ./schemas/
 COPY .env.default ./.env.default
 COPY main.py ./main.py
 
-# ── Step 1 : Pin torch BEFORE docling resolves it ───────────────────────────
-# torch >= 2.10 started shipping aarch64 CUDA wheels
-# (nvidia_cudnn_cu13 444 MB + nvidia_cusparselt_cu13 221 MB) that are
-# useless inside Docker on Mac.  Pin to the last CPU-only aarch64 version.
-RUN pip install --no-cache-dir --timeout 1800 \
-    "torch>=2.2.2,<2.10.0" \
-    "torchvision>=0.17.0,<0.25.0"
-
-# ── Step 2 : Install the rest of the requirements ────────────────────────────
-# pip will see torch is already satisfied and skip the heavy CUDA re-download.
+# ── Install requirements ─────────────────────────────────────────────────────
 COPY web/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --timeout 600 -r requirements.txt
 

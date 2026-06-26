@@ -1,6 +1,7 @@
 import os
 import logging
-from docling.document_converter import DocumentConverter
+import requests
+import json
 
 try:
     from google.adk.tools.tool_context import ToolContext
@@ -48,9 +49,31 @@ def docling_parser_tool(tool_context: ToolContext, pdf_path: str = "FTD.01_R_RPD
             return {"status": "error", "message": msg}
             
     try:
-        converter = DocumentConverter()
-        result = converter.convert(pdf_path)
-        markdown_content = result.document.export_to_markdown()
+        docling_serve_url = os.environ.get("DOCLING_SERVE_URL", "http://docling-serve:5001")
+        convert_url = f"{docling_serve_url.rstrip('/')}/v1/convert/file"
+        
+        logger.info(f"Sending PDF to docling-serve for parsing: {pdf_path} (URL: {convert_url})")
+        
+        with open(pdf_path, "rb") as f:
+            files = {"files": (os.path.basename(pdf_path), f, "application/pdf")}
+            data = {"options": json.dumps({"to_formats": ["md"]})}
+            
+            response = requests.post(convert_url, files=files, data=data, timeout=600)
+            
+        if response.status_code != 200:
+            msg = f"Docling server returned error status {response.status_code}: {response.text}"
+            logger.error(msg)
+            return {"status": "error", "message": msg}
+            
+        result = response.json()
+        document = result.get("document", {})
+        markdown_content = document.get("md_content")
+        
+        if not markdown_content:
+            error_msg = result.get("errors") or result.get("message") or "No markdown content returned by docling-serve"
+            msg = f"Failed to get markdown content from docling-serve: {error_msg}"
+            logger.error(msg)
+            return {"status": "error", "message": msg}
         
         # Save to shared agent session state
         tool_context.state["rpd_content"] = markdown_content

@@ -6,13 +6,8 @@ services:
       dockerfile: web/Dockerfile
     ports:
       - "8080:8080"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    depends_on:
+      - docling-serve
     networks:
       - koma-net
     volumes:
@@ -44,6 +39,7 @@ services:
       - STORAGE_SECRET=${STORAGE_SECRET:-timplan-secret-key-change-me}
       # Enable NiceGUI hot-reload
       - NICEGUI_RELOAD=true
+      - DOCLING_SERVE_URL=http://docling-serve:5001
 
     env_file:
       - .env          # web/.env  (contains GOOGLE_API_KEY etc.)
@@ -56,6 +52,15 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+
+  docling-serve:
+    image: quay.io/docling-project/docling-serve-cpu:latest
+    container_name: docling-serve
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    networks:
+      - koma-net
 
 volumes:
   app_data:
