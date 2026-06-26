@@ -29,6 +29,7 @@ services:
       - AMNEZIAWG_H3=${VPN_H3}
       - AMNEZIAWG_H4=${VPN_H4}
       - AMNEZIAWG_PERSISTENT_KEEPALIVE_INTERVAL=${VPN_PERSISTENT_KEEPALIVE}
+      - AMNEZIAWG_MTU=${VPN_MTU:-1280}
     restart: unless-stopped
 
   web:

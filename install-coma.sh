@@ -149,6 +149,10 @@ VPN_KEEPALIVE=$(get_ini_val "amnezia.config" "PersistentKeepalive")
 if [[ ! "$VPN_KEEPALIVE" =~ s$ ]] && [ -n "$VPN_KEEPALIVE" ]; then
     VPN_KEEPALIVE="${VPN_KEEPALIVE}s"
 fi
+VPN_MTU=$(get_ini_val "amnezia.config" "Mtu")
+if [ -z "$VPN_MTU" ]; then
+    VPN_MTU="1280"
+fi
 
 set_env_var "VPN_ADDRESS" "$VPN_ADDRESS"
 set_env_var "VPN_PRIVATE_KEY" "$VPN_PRIVATE_KEY"
@@ -166,6 +170,7 @@ set_env_var "VPN_H2" "$VPN_H2"
 set_env_var "VPN_H3" "$VPN_H3"
 set_env_var "VPN_H4" "$VPN_H4"
 set_env_var "VPN_PERSISTENT_KEEPALIVE" "$VPN_KEEPALIVE"
+set_env_var "VPN_MTU" "$VPN_MTU"
 echo -e "${GREEN}VPN configurations updated in .env successfully.${NC}"
 
 # 3. Ensure .env.default is present at root (required by Dockerfile)
