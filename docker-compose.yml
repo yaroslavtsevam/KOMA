@@ -1,14 +1,44 @@
 services:
+  gluetun:
+    image: qdm12/gluetun:latest
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "8080:8080" # Map the koma web UI port through gluetun!
+    networks:
+      - koma-net
+    environment:
+      - VPN_SERVICE_PROVIDER=custom
+      - VPN_TYPE=amneziawg
+      - AMNEZIAWG_PRIVATE_KEY=${VPN_PRIVATE_KEY}
+      - AMNEZIAWG_ADDRESSES=${VPN_ADDRESS}
+      - AMNEZIAWG_PUBLIC_KEY=${VPN_PUBLIC_KEY}
+      - AMNEZIAWG_ENDPOINT_IP=${VPN_ENDPOINT_IP}
+      - AMNEZIAWG_ENDPOINT_PORT=${VPN_ENDPOINT_PORT}
+      - AMNEZIAWG_PRESHARED_KEY=${VPN_PRESHARED_KEY}
+      - AMNEZIAWG_JC=${VPN_JC}
+      - AMNEZIAWG_JMIN=${VPN_JMIN}
+      - AMNEZIAWG_JMAX=${VPN_JMAX}
+      - AMNEZIAWG_S1=${VPN_S1}
+      - AMNEZIAWG_S2=${VPN_S2}
+      - AMNEZIAWG_H1=${VPN_H1}
+      - AMNEZIAWG_H2=${VPN_H2}
+      - AMNEZIAWG_H3=${VPN_H3}
+      - AMNEZIAWG_H4=${VPN_H4}
+      - AMNEZIAWG_PERSISTENT_KEEPALIVE_INTERVAL=${VPN_PERSISTENT_KEEPALIVE}
+    restart: unless-stopped
+
   web:
     build:
       context: .
       dockerfile: web/Dockerfile
-    ports:
-      - "8080:8080"
+    network_mode: "service:gluetun" # Route traffic through Gluetun
     depends_on:
+      - gluetun
       - docling-serve
-    networks:
-      - koma-net
     volumes:
       # Bind-mount directories from the repository root
       - ./input:/app/input

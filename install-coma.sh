@@ -41,10 +41,45 @@ if ! docker compose version &> /dev/null; then
     fi
 fi
 
+# Helper to read ini values
+get_ini_val() {
+    local file="$1"
+    local key="$2"
+    grep -i "^[[:space:]]*${key}[[:space:]]*=" "$file" | head -n 1 | cut -d'=' -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+# Helper to set/update variables in .env file
+set_env_var() {
+    local key="$1"
+    local val="$2"
+    local file=".env"
+    if grep -q "^[[:space:]]*${key}[[:space:]]*=" "$file"; then
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s|^[[:space:]]*${key}[[:space:]]*=.*|${key}=${val}|g" "$file"
+        else
+            sed -i "s|^[[:space:]]*${key}[[:space:]]*=.*|${key}=${val}|g" "$file"
+        fi
+    else
+        # Ensure file ends with a newline before appending
+        if [ -f "$file" ] && [ -n "$(tail -c 1 "$file")" ]; then
+            echo "" >> "$file"
+        fi
+        echo "${key}=${val}" >> "$file"
+    fi
+}
+
 # 2. Configure .env file at the root
 ENV_FILE=".env"
 ENV_EXAMPLE="web/.env.example"
 
+# 2.1 Ensure amnezia.config exists
+if [ ! -f "amnezia.config" ]; then
+    echo -e "${RED}Error: amnezia.config is missing at the repository root.${NC}"
+    echo -e "${YELLOW}Please place your AmneziaWG configuration file in the project root as 'amnezia.config' and re-run this script.${NC}"
+    exit 1
+fi
+
+# 2.2 Create .env from template if missing
 if [ ! -f "$ENV_FILE" ]; then
     echo -e "${GREEN}Creating .env configuration...${NC}"
     if [ -f "$ENV_EXAMPLE" ]; then
@@ -89,10 +124,49 @@ EOF
             sed -i "s/GOOGLE_API_KEY=your_google_api_key_here/GOOGLE_API_KEY=$API_KEY/g" "$ENV_FILE"
         fi
     fi
-    echo -e "${GREEN}.env configured successfully at the root.${NC}"
-else
-    echo -e "${YELLOW}.env configuration already exists at the root. Skipping env setup.${NC}"
+    echo -e "${GREEN}.env file initialized at the root.${NC}"
 fi
+
+# 2.3 Parse and write/update VPN settings from amnezia.config
+echo -e "${GREEN}Parsing VPN parameters from amnezia.config...${NC}"
+VPN_ADDRESS=$(get_ini_val "amnezia.config" "Address")
+VPN_PRIVATE_KEY=$(get_ini_val "amnezia.config" "PrivateKey")
+VPN_PUBLIC_KEY=$(get_ini_val "amnezia.config" "PublicKey")
+VPN_PRESHARED_KEY=$(get_ini_val "amnezia.config" "PresharedKey")
+VPN_ENDPOINT=$(get_ini_val "amnezia.config" "Endpoint")
+VPN_ENDPOINT_IP=$(echo "$VPN_ENDPOINT" | cut -d':' -f1)
+VPN_ENDPOINT_PORT=$(echo "$VPN_ENDPOINT" | cut -d':' -f2)
+VPN_JC=$(get_ini_val "amnezia.config" "Jc")
+VPN_JMIN=$(get_ini_val "amnezia.config" "Jmin")
+VPN_JMAX=$(get_ini_val "amnezia.config" "Jmax")
+VPN_S1=$(get_ini_val "amnezia.config" "S1")
+VPN_S2=$(get_ini_val "amnezia.config" "S2")
+VPN_H1=$(get_ini_val "amnezia.config" "H1")
+VPN_H2=$(get_ini_val "amnezia.config" "H2")
+VPN_H3=$(get_ini_val "amnezia.config" "H3")
+VPN_H4=$(get_ini_val "amnezia.config" "H4")
+VPN_KEEPALIVE=$(get_ini_val "amnezia.config" "PersistentKeepalive")
+if [[ ! "$VPN_KEEPALIVE" =~ s$ ]] && [ -n "$VPN_KEEPALIVE" ]; then
+    VPN_KEEPALIVE="${VPN_KEEPALIVE}s"
+fi
+
+set_env_var "VPN_ADDRESS" "$VPN_ADDRESS"
+set_env_var "VPN_PRIVATE_KEY" "$VPN_PRIVATE_KEY"
+set_env_var "VPN_PUBLIC_KEY" "$VPN_PUBLIC_KEY"
+set_env_var "VPN_PRESHARED_KEY" "$VPN_PRESHARED_KEY"
+set_env_var "VPN_ENDPOINT_IP" "$VPN_ENDPOINT_IP"
+set_env_var "VPN_ENDPOINT_PORT" "$VPN_ENDPOINT_PORT"
+set_env_var "VPN_JC" "$VPN_JC"
+set_env_var "VPN_JMIN" "$VPN_JMIN"
+set_env_var "VPN_JMAX" "$VPN_JMAX"
+set_env_var "VPN_S1" "$VPN_S1"
+set_env_var "VPN_S2" "$VPN_S2"
+set_env_var "VPN_H1" "$VPN_H1"
+set_env_var "VPN_H2" "$VPN_H2"
+set_env_var "VPN_H3" "$VPN_H3"
+set_env_var "VPN_H4" "$VPN_H4"
+set_env_var "VPN_PERSISTENT_KEEPALIVE" "$VPN_KEEPALIVE"
+echo -e "${GREEN}VPN configurations updated in .env successfully.${NC}"
 
 # 3. Ensure .env.default is present at root (required by Dockerfile)
 DEFAULT_ENV_FILE=".env.default"
