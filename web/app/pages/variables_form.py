@@ -6,6 +6,7 @@ Supports: scalars, null-able fields, string lists (add/remove/edit),
           dicts as expansion panels, and lists of dicts.
 """
 
+import os
 import copy
 import yaml
 from pathlib import Path
