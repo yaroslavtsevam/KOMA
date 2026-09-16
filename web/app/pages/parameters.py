@@ -7,7 +7,13 @@ parameters.py – Step 1: Edit processing parameters (/project/{id}/parameters)
 import asyncio
 from pathlib import Path
 from nicegui import ui, background_tasks
-from ..db import get_project, update_project_status, update_project_files, processing_dir
+from ..db import (
+    get_project,
+    update_project_status,
+    update_project_files,
+    processing_dir,
+    results_dir,
+)
 from ..auth import current_user, require_login
 from ..pipeline import (
     load_env_defaults,
@@ -263,8 +269,8 @@ async def processing_page(project_id: int):
 import zipfile
 
 def _build_project_zip(project_name: str) -> str:
-    res_dir = Path("results") / project_name
-    proc_dir = Path("processing") / project_name
+    res_dir = results_dir(project_name)
+    proc_dir = processing_dir(project_name)
     res_dir.mkdir(parents=True, exist_ok=True)
     zip_path = res_dir / f"{project_name}_Комплект_РПД_ОМД.zip"
 
