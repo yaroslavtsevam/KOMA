@@ -297,11 +297,15 @@ async def variables_page(project_id: int):
     env_path = proc_dir / "parameters.env"
     params = read_parameters_env(env_path)
 
+    has_plan = bool(project.get("plan_path") or project.get("plan_filename") or project.get("course_code"))
     is_structure_only = (status == "variables")
-    active_step = 3 if is_structure_only else 5
+    if has_plan:
+        active_step = 3
+    else:
+        active_step = 3 if is_structure_only else 5
 
     # ── Build the page ────────────────────────────────────────────────────────
-    with page_layout(f"Переменные: {project['name']}", user):
+    with page_layout(f"ОМД: {project.get('course_name', project['name'])}", user):
         from .shared import _step_indicator
         _step_indicator(active_step, project)
 
@@ -309,7 +313,7 @@ async def variables_page(project_id: int):
         with ui.card().classes("app-card w-full mb-4").style("padding: 16px 24px;"):
             with ui.row().classes("w-full items-center gap-3"):
                 ui.icon("edit_note", size="1.4rem").style("color: #6366f1;")
-                ui.label("Редактор переменных документа" if not is_structure_only else "Проверка структуры документа").classes("text-base font-semibold flex-1")
+                ui.label("Редактор оценочных материалов и фонда вопросов").classes("text-base font-semibold flex-1")
 
                 async def do_save():
                     with open(variables_path, "w", encoding="utf-8") as f:
@@ -331,16 +335,30 @@ async def variables_page(project_id: int):
                     )
                     ui.navigate.to(f"/project/{project_id}/processing")
 
-                ui.button("← Назад к параметрам", icon="arrow_back", on_click=lambda: ui.navigate.to(
-                    f"/project/{project_id}/parameters"
-                )).props("flat").classes("text-gray-400")
+                if has_plan:
+                    ui.button("← Мастер РПД", icon="arrow_back", on_click=lambda: ui.navigate.to(
+                        f"/project/{project_id}/rpd"
+                    )).props("flat").classes("text-gray-400")
+                else:
+                    ui.button("← Назад к параметрам", icon="arrow_back", on_click=lambda: ui.navigate.to(
+                        f"/project/{project_id}/parameters"
+                    )).props("flat").classes("text-gray-400")
 
                 ui.button("Сохранить", icon="save", on_click=do_save).props("flat").classes("text-indigo-300")
 
-                if is_structure_only:
+                # Allow direct OMD generation if questions are present or if has_plan
+                has_questions = False
+                acts = data.get("activities", [])
+                if acts and any(a.get("questions") for a in acts):
+                    has_questions = True
+
+                if not has_questions and is_structure_only and not has_plan:
                     ui.button("Генерация вопросов →", icon="psychology", on_click=do_generate_questions).classes("success-btn")
                 else:
-                    ui.button("Сгенерировать Word документ →", icon="description", on_click=do_generate_docx).classes("success-btn")
+                    with ui.row().classes("gap-2"):
+                        if os.environ.get("GOOGLE_API_KEY"):
+                            ui.button("AI Вопросы", icon="psychology", on_click=do_generate_questions).props("outline color=indigo")
+                        ui.button("Сгенерировать ОМД (.docx) →", icon="description", on_click=do_generate_docx).classes("success-btn")
 
         # ── Tabs for logical grouping ─────────────────────────────────────────
         with ui.tabs().props("dark active-color=indigo indicator-color=indigo").classes("mb-2") as tabs:

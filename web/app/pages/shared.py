@@ -107,12 +107,16 @@ _GLOBAL_CSS = """
 
 STATUS_LABELS = {
     "new":                  "Новый",
+    "plan_uploaded":        "План загружен",
+    "rpd_wizard":           "Мастер РПД",
+    "generating_rpd":       "Генерация РПД...",
+    "rpd_ready":            "РПД готова",
     "processing_structure": "Сбор структуры...",
     "variables":            "Проверка структуры",
     "generating_questions": "Генерация вопросов...",
     "questions":            "Проверка вопросов",
-    "generating_docx":      "Генерация Word...",
-    "done":                 "Готов",
+    "generating_docx":      "Генерация ОМД...",
+    "done":                 "Готов (РПД + ОМД)",
     "error":                "Ошибка",
 }
 
@@ -134,7 +138,7 @@ def page_layout(title: str, user: dict):
         ):
             with ui.row().classes("items-center gap-2 mb-8 px-2"):
                 ui.icon("school", size="1.6rem").style("color:#6366f1;")
-                ui.label("Комплексный Оптимизатор Методических Актов").classes("text-xl font-bold logo-gradient")
+                ui.label("КОМА").classes("text-xl font-bold logo-gradient")
 
             with ui.column().classes("gap-1 w-full"):
                 ui.label("НАВИГАЦИЯ").classes("text-xs text-gray-600 font-semibold px-2 mb-1")
@@ -179,55 +183,67 @@ def _step_indicator(active: int, project: dict):
     from pathlib import Path
     project_id = project["id"]
     status = project.get("status", "new")
+    has_plan = bool(project.get("plan_path") or project.get("plan_filename") or project.get("course_code"))
 
-    # Check accessibility for each step
-    is_running = status in ("processing_structure", "generating_questions", "generating_docx")
-
-    step1_avail = not is_running
-    step2_avail = status != "new" and not is_running
-
+    is_running = status in ("generating_rpd", "processing_structure", "generating_questions", "generating_docx")
     variables_path = project.get("variables_path")
-    step3_avail = bool(variables_path and Path(variables_path).exists() and not is_running)
+    rpd_path = project.get("rpd_path")
 
-    step4_avail = status in ("generating_questions", "questions", "generating_docx", "done")
-    step5_avail = bool(variables_path and Path(variables_path).exists() and status in ("questions", "generating_docx", "done") and not is_running)
-    step6_avail = status in ("generating_docx", "done")
-    step7_avail = bool(project.get("result_path") and Path(project["result_path"]).exists() and status == "done")
+    if has_plan:
+        # Unified 4-step pipeline: RPD -> Parameters -> OMD Questions -> Download
+        rpd_done = bool(rpd_path and Path(rpd_path).exists()) or status in ("rpd_ready", "variables", "questions", "done")
+        omd_avail = rpd_done and not is_running
+        vars_avail = bool(variables_path and Path(variables_path).exists() and not is_running)
+        done_avail = status == "done" or bool(project.get("result_path") and Path(project["result_path"]).exists())
 
-    steps = [
-        (1, "Параметры", "settings", f"/project/{project_id}/parameters", step1_avail),
-        (2, "Структура AI", "auto_awesome", f"/project/{project_id}/processing", step2_avail),
-        (3, "Проверка структуры", "edit_note", f"/project/{project_id}/variables", step3_avail),
-        (4, "Вопросы AI", "psychology", f"/project/{project_id}/processing", step4_avail),
-        (5, "Проверка вопросов", "rate_review", f"/project/{project_id}/variables", step5_avail),
-        (6, "Генерация Word", "build", f"/project/{project_id}/processing", step6_avail),
-        (7, "Готово", "download", f"/project/{project_id}/download", step7_avail),
-    ]
+        steps = [
+            (1, "1. Мастер РПД", "edit_document", f"/project/{project_id}/rpd", not is_running),
+            (2, "2. Параметры ОМД", "settings", f"/project/{project_id}/parameters", omd_avail),
+            (3, "3. Вопросы и задания", "rate_review", f"/project/{project_id}/variables", vars_avail),
+            (4, "4. Готовые документы", "download", f"/project/{project_id}/download", done_avail),
+        ]
+    else:
+        # Legacy syllabus-only pipeline
+        step1_avail = not is_running
+        step2_avail = status != "new" and not is_running
+        step3_avail = bool(variables_path and Path(variables_path).exists() and not is_running)
+        step4_avail = status in ("generating_questions", "questions", "generating_docx", "done")
+        step5_avail = bool(variables_path and Path(variables_path).exists() and status in ("questions", "generating_docx", "done") and not is_running)
+        step6_avail = status in ("generating_docx", "done")
+        step7_avail = bool(project.get("result_path") and Path(project["result_path"]).exists() and status == "done")
+
+        steps = [
+            (1, "Параметры", "settings", f"/project/{project_id}/parameters", step1_avail),
+            (2, "Структура AI", "auto_awesome", f"/project/{project_id}/processing", step2_avail),
+            (3, "Проверка структуры", "edit_note", f"/project/{project_id}/variables", step3_avail),
+            (4, "Вопросы AI", "psychology", f"/project/{project_id}/processing", step4_avail),
+            (5, "Проверка вопросов", "rate_review", f"/project/{project_id}/variables", step5_avail),
+            (6, "Генерация Word", "build", f"/project/{project_id}/processing", step6_avail),
+            (7, "Готово", "download", f"/project/{project_id}/download", step7_avail),
+        ]
 
     with ui.row().classes("w-full gap-0 mb-8 items-center"):
         for i, (num, label, icon, route, avail) in enumerate(steps):
             is_active = num == active
             is_done = num < active
 
-            # Colors
             if is_done:
-                color = "#10b981"  # Green for completed
+                color = "#10b981"  # Green
             elif is_active:
-                color = "#6366f1"  # Indigo for active
+                color = "#6366f1"  # Indigo
             else:
-                color = "rgba(255,255,255,0.15)"  # Gray for future
+                color = "rgba(255,255,255,0.15)"
 
             if is_done:
                 text_color = "#10b981"
             elif is_active:
                 text_color = "#c4b5fd"
             elif avail:
-                text_color = "#9ca3af"  # readable gray for available steps
+                text_color = "#9ca3af"
             else:
-                text_color = "#4b5563"  # dark gray for disabled
+                text_color = "#4b5563"
 
             with ui.column().classes("items-center gap-1").style("flex: 1; position: relative;"):
-                # Make interactive if available and not currently active
                 circle_classes = "items-center justify-center transition-all"
                 if avail and not is_active:
                     circle_classes += " cursor-pointer hover:scale-110"
@@ -241,7 +257,6 @@ def _step_indicator(active: int, project: dict):
                     else:
                         ui.icon(icon, size="1rem").style(f"color: {'white' if is_active else '#6b7280'};")
 
-                # Navigation event
                 if avail and not is_active:
                     circle.on("click", lambda _, r=route: ui.navigate.to(r))
 
@@ -253,4 +268,5 @@ def _step_indicator(active: int, project: dict):
                     f"flex: 2; height: 2px; background: {line_color}; "
                     f"margin-top: -20px; border: none; align-self: flex-start;"
                 )
+
 

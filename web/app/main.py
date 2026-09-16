@@ -42,6 +42,7 @@ async def startup():
 from .pages import login          # noqa: F401  /  /login
 from .pages import dashboard      # noqa: F401  /dashboard
 from .pages import admin          # noqa: F401  /admin
+from .pages import rpd_wizard     # noqa: F401  /project/{id}/rpd
 from .pages import parameters     # noqa: F401  /project/{id}/parameters
                                   #             /project/{id}/processing
                                   #             /project/{id}/download

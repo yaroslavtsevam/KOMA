@@ -1,11 +1,4 @@
-services:
-  docling-serve:
-    # Use the official CUDA-accelerated image for docling-serve
-    image: ghcr.io/docling-project/docling-serve-cu124:latest
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+# GPU acceleration override for Docker Compose
+# Note: Docling-serve has been replaced with lightweight native PyMuPDF parsing.
+# GPU containers are no longer needed for PDF parsing.
+services: {}

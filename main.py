@@ -29,12 +29,15 @@ if not os.environ.get("GOOGLE_API_KEY"):
     logger.warning("GOOGLE_API_KEY environment variable is not set. Gemini API calls will fail.")
 
 # Imports of tools
-from tools.docling_parser_tool import docling_parser_tool
+from tools.pdf_parser_tool import pdf_parser_tool, docling_parser_tool
 from tools.docx_generator_tool import (
     docx_generator_tool,
     clean_dict_hyphenations,
     clean_question_prefixes
 )
+from tools.rpd_generator_tool import generate_rpd_for_project
+from tools.rpd_to_omd_adapter import rpd_context_to_omd_variables
+from rpd_app.core.curriculum_parser import CurriculumParser
 from agents.analyzer_agent import analyzer_agent
 from agents.critic_agent import critic_agent
 
@@ -431,12 +434,142 @@ def run_generate_docx_step(project_name: str, params: dict, regenerate: bool = F
     return res
 
 
+# ── UNIFIED RPD & CURRICULUM STEPS ──────────────────────────────────────────
+
+def _find_plan_file(project_name: str, explicit_path: str = None) -> str:
+    """Finds curriculum plan PDF for project."""
+    if explicit_path and os.path.exists(explicit_path):
+        return explicit_path
+        
+    input_base_dir = "input"
+    project_input_dir = os.path.join(input_base_dir, project_name)
+    if os.path.exists(project_input_dir):
+        plx_files = [f for f in os.listdir(project_input_dir) if f.endswith(".plx.pdf")]
+        if plx_files:
+            return os.path.join(project_input_dir, plx_files[0])
+        pdf_files = [f for f in os.listdir(project_input_dir) if f.endswith(".pdf")]
+        if pdf_files:
+            return os.path.join(project_input_dir, pdf_files[0])
+            
+    # Check default research presets
+    preset = Path("RPD-research/цифровые технологии в природоохранной деятельности на предприятии/Учебные_планы/21.04.02_Zemleustroistvo_i_kadastry_(mag.)_CTvZA_2026.plx.pdf")
+    if preset.exists():
+        return str(preset)
+        
+    raise FileNotFoundError(f"Curriculum plan not found for project '{project_name}'.")
+
+
+def run_parse_plan_step(project_name: str, plan_path: str = None) -> dict:
+    """Parses curriculum plan with PyMuPDF, extracts metadata and lists disciplines."""
+    logger.info(f"--- Running Step: Parse Curriculum Plan for project '{project_name}' ---")
+    plan_file = _find_plan_file(project_name, plan_path)
+    parser = CurriculumParser(plan_file)
+    meta = parser.extract_metadata()
+    disciplines = parser.list_disciplines()
+    
+    proc_dir = os.path.join("processing", project_name)
+    os.makedirs(proc_dir, exist_ok=True)
+    summary_path = os.path.join(proc_dir, "curriculum_summary.json")
+    
+    data = {
+        "metadata": meta,
+        "disciplines_count": len(disciplines),
+        "disciplines": disciplines,
+        "plan_file": plan_file
+    }
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        
+    logger.info(f"Curriculum parsed: {len(disciplines)} disciplines found. Saved to {summary_path}")
+    return data
+
+
+def run_generate_rpd_step(project_name: str, plan_path: str = None, course_query: str = None, params: dict = None) -> dict:
+    """Generates 100% compliant RPD DOCX using 14 formatting rules."""
+    logger.info(f"--- Running Step: Generate RPD for project '{project_name}' ---")
+    plan_file = _find_plan_file(project_name, plan_path)
+    
+    query = course_query
+    if not query and params:
+        query = params.get("course_name") or params.get("course_code")
+    if not query:
+        # Check if project name or curriculum has hint
+        query = project_name
+        
+    results_dir = os.path.join("results", project_name)
+    os.makedirs(results_dir, exist_ok=True)
+    
+    res = generate_rpd_for_project(
+        project_name=project_name,
+        plan_pdf_path=plan_file,
+        course_name_or_code=query,
+        output_dir=results_dir
+    )
+    
+    # Save context copy to processing dir
+    proc_dir = os.path.join("processing", project_name)
+    os.makedirs(proc_dir, exist_ok=True)
+    proc_context_path = os.path.join(proc_dir, "rpd_context.json")
+    with open(proc_context_path, "w", encoding="utf-8") as f:
+        json.dump(res["context"], f, indent=2, ensure_ascii=False)
+        
+    logger.info(f"RPD generated successfully: {res['docx_path']}")
+    return res
+
+
+def run_rpd_to_omd_step(project_name: str, params: dict = None) -> dict:
+    """Converts verified RPD context into OMD variables.yml data."""
+    logger.info(f"--- Running Step: Convert RPD to OMD for project '{project_name}' ---")
+    proc_dir = os.path.join("processing", project_name)
+    rpd_ctx_candidates = [
+        os.path.join(proc_dir, "rpd_context.json"),
+        os.path.join("results", project_name, "teach_plan", "rpd_context.json"),
+    ]
+    rpd_ctx_file = None
+    for c in rpd_ctx_candidates:
+        if os.path.exists(c):
+            rpd_ctx_file = c
+            break
+            
+    if not rpd_ctx_file:
+        raise FileNotFoundError(f"rpd_context.json not found in processing/ or results/ for project '{project_name}'. Run 'generate_rpd' first.")
+        
+    with open(rpd_ctx_file, "r", encoding="utf-8") as f:
+        rpd_ctx = json.load(f)
+        
+    omd_data = rpd_context_to_omd_variables(rpd_ctx)
+    
+    variables_path = os.path.join(proc_dir, "variables.yml")
+    with open(variables_path, "w", encoding="utf-8") as f:
+        yaml.dump(omd_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        
+    logger.info(f"Successfully converted RPD context to OMD variables.yml at {variables_path}")
+    return {"status": "success", "variables_path": variables_path, "data": omd_data}
+
+
 # ── CLI & Main ────────────────────────────────────────────────────────────────
 
 async def main():
-    parser = argparse.ArgumentParser(description="TimPlan Syllabus Processing CLI")
+    parser = argparse.ArgumentParser(description="TimPlan & KOMA Unified Syllabus Processing CLI")
     parser.add_argument("--project", required=True, help="Project name (subdirectory in input/)")
-    parser.add_argument("--step", choices=["parse", "extract_structure", "generate_questions", "generate_docx", "all"], default="all", help="Pipeline step to execute")
+    parser.add_argument(
+        "--step",
+        choices=[
+            "parse",
+            "parse_plan",
+            "generate_rpd",
+            "rpd_to_omd",
+            "extract_structure",
+            "generate_questions",
+            "generate_docx",
+            "generate_omd",
+            "all"
+        ],
+        default="all",
+        help="Pipeline step to execute"
+    )
+    parser.add_argument("--plan", help="Path to curriculum plan PDF (.plx.pdf or .pdf)")
+    parser.add_argument("--course", help="Target course name or code (e.g. 'Цифровые технологии...')")
     parser.add_argument("--regenerate", action="store_true", help="Force regenerate files")
     
     # Parameters overrides
@@ -451,21 +584,50 @@ async def main():
     
     proc_dir = os.path.join("processing", project_name)
     params = load_project_parameters(project_name, proc_dir, args)
+    if args.course:
+        params["course_name"] = args.course
     
     try:
         if step == "parse":
             run_parse_step(project_name, regenerate)
+        elif step == "parse_plan":
+            run_parse_plan_step(project_name, args.plan)
+        elif step == "generate_rpd":
+            run_generate_rpd_step(project_name, args.plan, args.course, params)
+        elif step == "rpd_to_omd":
+            run_rpd_to_omd_step(project_name, params)
         elif step == "extract_structure":
             await run_extract_structure_step(project_name, params, regenerate)
         elif step == "generate_questions":
             await run_generate_questions_step(project_name, params, regenerate)
-        elif step == "generate_docx":
+        elif step in ("generate_docx", "generate_omd"):
             run_generate_docx_step(project_name, params, regenerate)
         elif step == "all":
-            run_parse_step(project_name, regenerate)
-            await run_extract_structure_step(project_name, params, regenerate)
-            await run_generate_questions_step(project_name, params, regenerate)
-            run_generate_docx_step(project_name, params, regenerate)
+            # Check if this is a curriculum-first project
+            has_plan = bool(args.plan)
+            if not has_plan:
+                inp_dir = os.path.join("input", project_name)
+                if os.path.exists(inp_dir):
+                    has_plan = any(f.endswith(".plx.pdf") or "plan" in f.lower() for f in os.listdir(inp_dir))
+                    
+            if has_plan:
+                logger.info("=== Running Unified Curriculum -> RPD -> OMD Pipeline ===")
+                run_parse_plan_step(project_name, args.plan)
+                run_generate_rpd_step(project_name, args.plan, args.course, params)
+                run_rpd_to_omd_step(project_name, params)
+                # Questions are populated via bridge; if AI questions requested, run questions step
+                if os.environ.get("GOOGLE_API_KEY"):
+                    try:
+                        await run_generate_questions_step(project_name, params, regenerate)
+                    except Exception as err:
+                        logger.warning(f"AI questions step skipped or failed: {err}. Proceeding with template questions.")
+                run_generate_docx_step(project_name, params, regenerate)
+            else:
+                logger.info("=== Running Standard Syllabus -> OMD Pipeline ===")
+                run_parse_step(project_name, regenerate)
+                await run_extract_structure_step(project_name, params, regenerate)
+                await run_generate_questions_step(project_name, params, regenerate)
+                run_generate_docx_step(project_name, params, regenerate)
             
         logger.info(f"SUCCESS: Pipeline execution for step '{step}' completed.")
     except Exception as ex:
@@ -474,3 +636,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

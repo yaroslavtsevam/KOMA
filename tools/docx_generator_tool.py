@@ -357,11 +357,22 @@ def docx_generator_tool(tool_context: ToolContext, template_path: str = "templat
     Publisher agent tool: compiles results by saving intermediate files, loading
     user-editable questions from markdown, and generating the styled Word report.
     """
-    logger.info("Starting docx generator tool...")
-    data = clean_dict_hyphenations(tool_context.state.get("omd_json_data", {}))
+    data = tool_context.state.get("omd_json_data")
+    if not data:
+        project_name = tool_context.state.get("project_name", "unknown")
+        var_path = os.path.join("processing", project_name, "variables.yml")
+        if os.path.exists(var_path):
+            try:
+                with open(var_path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f)
+                logger.info(f"Loaded OMD data from {var_path}")
+            except Exception as e:
+                logger.warning(f"Failed to load {var_path}: {e}")
+
+    data = clean_dict_hyphenations(data or {})
     data = clean_question_prefixes(data)
     if not data:
-        msg = "No extracted JSON data found in session state['omd_json_data']"
+        msg = "No extracted JSON data found in session state['omd_json_data'] or variables.yml"
         logger.error(msg)
         return {"status": "error", "message": msg}
         

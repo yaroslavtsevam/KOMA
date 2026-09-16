@@ -260,6 +260,28 @@ async def processing_page(project_id: int):
 
 # ── Download page ─────────────────────────────────────────────────────────────
 
+import zipfile
+
+def _build_project_zip(project_name: str) -> str:
+    res_dir = Path("results") / project_name
+    proc_dir = Path("processing") / project_name
+    res_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = res_dir / f"{project_name}_Комплект_РПД_ОМД.zip"
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in res_dir.glob("*.docx"):
+            z.write(f, arcname=f"Документы/{f.name}")
+        tp_dir = res_dir / "teach_plan"
+        if tp_dir.exists():
+            for f in tp_dir.glob("*.*"):
+                z.write(f, arcname=f"Данные_учебного_плана/{f.name}")
+        v_file = proc_dir / "variables.yml"
+        if v_file.exists():
+            z.write(v_file, arcname="Данные_учебного_плана/variables.yml")
+
+    return str(zip_path)
+
+
 @ui.page("/project/{project_id}/download")
 async def download_page(project_id: int):
     if not require_login():
@@ -272,39 +294,89 @@ async def download_page(project_id: int):
         return
 
     status = project.get("status", "new")
-    if status != "done":
+    if status != "done" and not project.get("result_path"):
         _redirect_by_status(project_id, status)
         return
 
-    result_path = project.get("result_path") or ""
+    proj_name = project["name"]
+    res_dir = results_dir(proj_name)
+    has_plan = bool(project.get("plan_path") or project.get("plan_filename") or project.get("course_code"))
+    step_num = 4 if has_plan else 7
+
+    # Find RPD and OMD docx files
+    rpd_path = project.get("rpd_path")
+    if not rpd_path or not Path(rpd_path).exists():
+        rpd_matches = list(res_dir.glob("*РПД*.docx"))
+        if rpd_matches:
+            rpd_path = str(rpd_matches[0])
+
+    omd_path = project.get("result_path") or project.get("omd_path")
+    if not omd_path or not Path(omd_path).exists():
+        omd_matches = list(res_dir.glob("*OMD*.docx"))
+        if omd_matches:
+            omd_path = str(omd_matches[0])
 
     with page_layout(f"Готово: {project['name']}", user):
-        _step_indicator(7, project)
+        _step_indicator(step_num, project)
 
-        with ui.card().classes("app-card w-full items-center").style("padding: 48px; text-align: center;"):
-            ui.icon("check_circle", size="5rem").style("color: #10b981;")
-            ui.label("Документ сформирован!").classes("text-2xl font-bold mt-4 mb-2")
-            ui.label("Нажмите кнопку ниже, чтобы скачать результирующий файл .docx").classes(
-                "text-sm text-gray-400 mb-8"
-            )
+        with ui.card().classes("app-card w-full items-center").style("padding: 36px 48px; text-align: center;"):
+            ui.icon("check_circle", size="4.5rem").style("color: #10b981;")
+            ui.label("Комплект учебно-методической документации готов!").classes("text-2xl font-bold mt-3 mb-1 text-white")
+            ui.label(
+                "Рабочая программа дисциплины (РПД) и Оценочные материалы (ОМД) "
+                "успешно сгенерированы и соответствуют всем академическим требованиям."
+            ).classes("text-sm text-gray-400 mb-8")
 
-            if result_path and Path(result_path).exists():
-                filename = Path(result_path).name
+            with ui.grid(columns=3).classes("w-full gap-6 mb-8 text-left"):
+                # Card 1: RPD
+                with ui.card().classes("bg-slate-900/60 border border-slate-700/50 p-5 rounded-xl flex flex-col justify-between"):
+                    with ui.column().classes("gap-1"):
+                        with ui.row().classes("items-center gap-2 mb-2"):
+                            ui.icon("description", size="1.6rem").style("color: #10b981;")
+                            ui.label("РПД (.docx)").classes("text-lg font-bold text-white")
+                        ui.label("Рабочая программа с альбомной Таблицей 1 и 14 правилами верстки.").classes("text-xs text-gray-400 mb-4")
+                    if rpd_path and Path(rpd_path).exists():
+                        rfname = Path(rpd_path).name
+                        ui.button(f"Скачать РПД", icon="download", on_click=lambda p=rpd_path, n=rfname: ui.download(p, filename=n)).classes("success-btn w-full")
+                    else:
+                        ui.button("Сформировать РПД", icon="edit", on_click=lambda: ui.navigate.to(f"/project/{project_id}/rpd")).props("flat").classes("w-full text-indigo-400")
 
-                def do_download():
-                    ui.download(result_path, filename=filename)
+                # Card 2: OMD
+                with ui.card().classes("bg-slate-900/60 border border-slate-700/50 p-5 rounded-xl flex flex-col justify-between"):
+                    with ui.column().classes("gap-1"):
+                        with ui.row().classes("items-center gap-2 mb-2"):
+                            ui.icon("menu_book", size="1.6rem").style("color: #6366f1;")
+                            ui.label("ОМД (.docx)").classes("text-lg font-bold text-white")
+                        ui.label("Оценочные материалы (ФОС) с вопросами и шкалами оценивания.").classes("text-xs text-gray-400 mb-4")
+                    if omd_path and Path(omd_path).exists():
+                        ofname = Path(omd_path).name
+                        ui.button(f"Скачать ОМД", icon="download", on_click=lambda p=omd_path, n=ofname: ui.download(p, filename=n)).classes("primary-btn w-full")
+                    else:
+                        ui.label("ОМД формируется...").classes("text-xs text-amber-400")
 
+                # Card 3: Full ZIP Archive
+                with ui.card().classes("bg-slate-900/60 border border-indigo-500/40 p-5 rounded-xl flex flex-col justify-between"):
+                    with ui.column().classes("gap-1"):
+                        with ui.row().classes("items-center gap-2 mb-2"):
+                            ui.icon("archive", size="1.6rem").style("color: #8b5cf6;")
+                            ui.label("Полный комплект (ZIP)").classes("text-lg font-bold text-white")
+                        ui.label("Архив со всеми файлами (РПД, ОМД, teach_plan JSON и variables.yml).").classes("text-xs text-gray-400 mb-4")
+
+                    def do_download_zip():
+                        z_path = _build_project_zip(proj_name)
+                        ui.download(z_path, filename=Path(z_path).name)
+
+                    ui.button("Скачать ZIP-архив", icon="folder_zip", on_click=do_download_zip).props("outline color=purple size=md").classes("w-full")
+
+            ui.separator().classes("my-6 w-full max-w-md").style("border-color: rgba(99,102,241,0.2);")
+
+            with ui.row().classes("gap-4"):
+                if has_plan:
+                    ui.button(
+                        "Вернуться к мастеру РПД", icon="edit_document", on_click=lambda: ui.navigate.to(f"/project/{project_id}/rpd")
+                    ).props("flat").classes("text-indigo-400")
                 ui.button(
-                    f"Скачать {filename}", icon="download", on_click=do_download
-                ).classes("success-btn").props("size=lg")
-            else:
-                ui.label("Файл не найден на сервере.").classes("text-red-400")
-
-            ui.separator().classes("my-8 w-full max-w-sm").style("border-color: rgba(99,102,241,0.2);")
-
-            with ui.row().classes("gap-3"):
-                ui.button(
-                    "Вернуться к форме переменных", icon="edit", on_click=lambda: ui.navigate.to(f"/project/{project_id}/variables")
+                    "Вернуться к вопросам ОМД", icon="edit", on_click=lambda: ui.navigate.to(f"/project/{project_id}/variables")
                 ).props("flat").classes("text-indigo-400")
                 ui.button(
                     "К списку проектов", icon="folder", on_click=lambda: ui.navigate.to("/dashboard")
@@ -316,6 +388,10 @@ async def download_page(project_id: int):
 def _redirect_by_status(project_id: int, status: str):
     routes = {
         "new":                  f"/project/{project_id}/parameters",
+        "plan_uploaded":        f"/project/{project_id}/rpd",
+        "rpd_wizard":           f"/project/{project_id}/rpd",
+        "generating_rpd":       f"/project/{project_id}/rpd",
+        "rpd_ready":            f"/project/{project_id}/rpd",
         "error":                f"/project/{project_id}/parameters",
         "processing_structure": f"/project/{project_id}/processing",
         "generating_questions": f"/project/{project_id}/processing",
@@ -325,4 +401,5 @@ def _redirect_by_status(project_id: int, status: str):
         "done":                 f"/project/{project_id}/download",
     }
     ui.navigate.to(routes.get(status, "/dashboard"))
+
 

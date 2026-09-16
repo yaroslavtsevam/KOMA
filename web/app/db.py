@@ -41,17 +41,42 @@ def init_db() -> None:
                 name          TEXT NOT NULL,
                 status        TEXT DEFAULT 'new',
                 error_message TEXT,
+                plan_filename TEXT,
+                course_code   TEXT,
+                course_name   TEXT,
+                rpd_path      TEXT,
+                omd_path      TEXT,
                 created_at    TEXT DEFAULT (datetime('now'))
             );
 
             CREATE TABLE IF NOT EXISTS project_files (
                 project_id      INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
                 syllabus_path   TEXT,
+                plan_path       TEXT,
                 parameters_path TEXT,
                 variables_path  TEXT,
+                rpd_path        TEXT,
+                omd_path        TEXT,
                 result_path     TEXT
             );
         """)
+
+        # Gracefully add any columns if upgrading existing database
+        columns_to_add = [
+            ("projects", "plan_filename", "TEXT"),
+            ("projects", "course_code", "TEXT"),
+            ("projects", "course_name", "TEXT"),
+            ("projects", "rpd_path", "TEXT"),
+            ("projects", "omd_path", "TEXT"),
+            ("project_files", "plan_path", "TEXT"),
+            ("project_files", "rpd_path", "TEXT"),
+            ("project_files", "omd_path", "TEXT"),
+        ]
+        for tbl, col, coltype in columns_to_add:
+            try:
+                conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {coltype}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
         # Bootstrap admin account
         if not conn.execute("SELECT 1 FROM users WHERE username='admin'").fetchone():
@@ -124,10 +149,18 @@ def change_password(user_id: int, new_password: str) -> None:
 
 # ── Projects ─────────────────────────────────────────────────────────────────
 
-def create_project(user_id: int, name: str) -> int:
+def create_project(
+    user_id: int,
+    name: str,
+    course_code: str = "",
+    course_name: str = "",
+    plan_filename: str = ""
+) -> int:
     with _connect() as conn:
         cur = conn.execute(
-            "INSERT INTO projects (user_id, name) VALUES (?,?)", (user_id, name)
+            """INSERT INTO projects (user_id, name, course_code, course_name, plan_filename)
+               VALUES (?, ?, ?, ?, ?)""",
+            (user_id, name, course_code, course_name, plan_filename)
         )
         pid = cur.lastrowid
         conn.execute("INSERT INTO project_files (project_id) VALUES (?)", (pid,))
@@ -137,8 +170,8 @@ def create_project(user_id: int, name: str) -> int:
 def get_project(project_id: int) -> dict | None:
     with _connect() as conn:
         row = conn.execute(
-            """SELECT p.*, pf.syllabus_path, pf.parameters_path,
-                      pf.variables_path, pf.result_path
+            """SELECT p.*, pf.syllabus_path, pf.plan_path, pf.parameters_path,
+                      pf.variables_path, pf.rpd_path, pf.omd_path, pf.result_path
                FROM projects p
                LEFT JOIN project_files pf ON p.id = pf.project_id
                WHERE p.id = ?""",
@@ -150,8 +183,8 @@ def get_project(project_id: int) -> dict | None:
 def get_user_projects(user_id: int) -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
-            """SELECT p.*, pf.syllabus_path, pf.parameters_path,
-                      pf.variables_path, pf.result_path
+            """SELECT p.*, pf.syllabus_path, pf.plan_path, pf.parameters_path,
+                      pf.variables_path, pf.rpd_path, pf.omd_path, pf.result_path
                FROM projects p
                LEFT JOIN project_files pf ON p.id = pf.project_id
                WHERE p.user_id = ?
@@ -167,6 +200,16 @@ def update_project_status(project_id: int, status: str, error: str | None = None
             "UPDATE projects SET status=?, error_message=? WHERE id=?",
             (status, error, project_id),
         )
+
+
+def update_project_meta(project_id: int, **fields) -> None:
+    if not fields:
+        return
+    set_clause = ", ".join(f"{k}=?" for k in fields)
+    values = list(fields.values()) + [project_id]
+    with _connect() as conn:
+        conn.execute(f"UPDATE projects SET {set_clause} WHERE id=?", values)
+
 
 
 def update_project_files(project_id: int, **fields) -> None:

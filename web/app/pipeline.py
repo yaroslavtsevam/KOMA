@@ -6,6 +6,7 @@ in the background and update the SQLite project status.
 import asyncio
 import logging
 import os
+import sys
 import subprocess
 from pathlib import Path
 
@@ -98,20 +99,29 @@ def write_parameters_env(env_path: Path, project_name: str, params: dict) -> Non
             f.write(f"{k}={v}\n")
 
 
-async def _run_subprocess_step(project_name: str, step: str, params: dict, regenerate: bool = False) -> bool:
+async def _run_subprocess_step(
+    project_name: str,
+    step: str,
+    params: dict = None,
+    regenerate: bool = False,
+    extra_args: list = None
+) -> bool:
     """Executes main.py CLI step as an async subprocess and logs to pipeline.log."""
+    params = params or {}
     proc_dir = processing_dir(project_name)
     log_file_path = proc_dir / "pipeline.log"
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [
-        "python3",
+        sys.executable,
         str(_PROJECT_ROOT / "main.py"),
         "--project", project_name,
         "--step", step,
     ]
     if regenerate:
         cmd.append("--regenerate")
+    if extra_args:
+        cmd.extend(extra_args)
     for k, v in params.items():
         cmd.extend([f"--{k}", str(v)])
 
@@ -136,6 +146,109 @@ async def _run_subprocess_step(project_name: str, step: str, params: dict, regen
             log_f.write(f"\nFailed to launch subprocess: {exc}\n")
             logger.exception("Failed to launch CLI subprocess for step %s", step)
             return False
+
+
+# ── STEP RPD: Generate RPD ───────────────────────────────────────────────────
+
+async def run_rpd_generation(
+    project_id: int,
+    username: str,
+    project_name: str,
+    plan_path: str,
+    course_name: str,
+    custom_context: dict = None
+) -> None:
+    """Generates RPD document from curriculum plan and saves context."""
+    update_project_status(project_id, "generating_rpd")
+    try:
+        from tools.rpd_generator_tool import generate_rpd_for_project
+        from .db import update_project_meta
+
+        res_dir = results_dir(project_name)
+        proc_dir = processing_dir(project_name)
+
+        # Run generator
+        loop = asyncio.get_running_loop()
+        res = await loop.run_in_executor(
+            None,
+            lambda: generate_rpd_for_project(
+                project_name=project_name,
+                plan_pdf_path=plan_path,
+                course_name_or_code=course_name,
+                output_dir=str(res_dir),
+                custom_context=custom_context
+            )
+        )
+
+        rpd_docx_path = res["docx_path"]
+        context_path = res["context_path"]
+
+        # Copy context to processing_dir
+        proc_context_path = proc_dir / "rpd_context.json"
+        with open(proc_context_path, "w", encoding="utf-8") as f:
+            import json
+            json.dump(res["context"], f, indent=2, ensure_ascii=False)
+
+        update_project_files(
+            project_id,
+            plan_path=str(plan_path),
+            rpd_path=str(rpd_docx_path)
+        )
+        update_project_meta(
+            project_id,
+            rpd_path=str(rpd_docx_path),
+            course_name=course_name
+        )
+        update_project_status(project_id, "rpd_ready")
+        logger.info("Project %s: RPD generated at %s", project_id, rpd_docx_path)
+
+    except Exception as exc:
+        logger.exception("RPD generation failed for project %s", project_id)
+        update_project_status(project_id, "error", str(exc))
+
+
+# ── STEP RPD -> OMD: Bridge RPD context to variables.yml ─────────────────────
+
+async def run_rpd_to_omd_bridge(
+    project_id: int,
+    username: str,
+    project_name: str,
+    params: dict = None
+) -> None:
+    """Converts verified RPD context into OMD variables.yml."""
+    update_project_status(project_id, "processing_structure")
+    try:
+        from tools.rpd_to_omd_adapter import rpd_context_to_omd_variables
+        import json
+        import yaml
+
+        proc_dir = processing_dir(project_name)
+        rpd_context_path = proc_dir / "rpd_context.json"
+        if not rpd_context_path.exists():
+            rpd_context_path = results_dir(project_name) / "teach_plan" / "rpd_context.json"
+
+        if not rpd_context_path.exists():
+            raise FileNotFoundError(f"rpd_context.json not found for project {project_name}")
+
+        with open(rpd_context_path, "r", encoding="utf-8") as f:
+            rpd_ctx = json.load(f)
+
+        omd_data = rpd_context_to_omd_variables(rpd_ctx)
+        variables_path = proc_dir / "variables.yml"
+        with open(variables_path, "w", encoding="utf-8") as f:
+            yaml.dump(omd_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+        update_project_files(
+            project_id,
+            variables_path=str(variables_path)
+        )
+        update_project_status(project_id, "variables")
+        logger.info("Project %s: Successfully bridged RPD to variables.yml", project_id)
+
+    except Exception as exc:
+        logger.exception("RPD to OMD bridge failed for project %s", project_id)
+        update_project_status(project_id, "error", str(exc))
+
 
 
 # ── STEP 1 & 2: Parse PDF & Extract Structure ────────────────────────────────
@@ -216,7 +329,9 @@ async def generate_docx(
         if not success:
             raise RuntimeError("CLI generate_docx step failed.")
 
-        update_project_files(project_id, result_path=str(result_docx))
+        update_project_files(project_id, result_path=str(result_docx), omd_path=str(result_docx))
+        from .db import update_project_meta
+        update_project_meta(project_id, omd_path=str(result_docx))
         update_project_status(project_id, "done")
 
     except Exception as exc:
