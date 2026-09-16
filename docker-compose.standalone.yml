@@ -1,0 +1,45 @@
+# Standalone Docker Compose for KOMA (without Gluetun VPN)
+# Use this when running locally without VPN tunneling requirements:
+#   docker compose -f docker-compose.standalone.yml up -d
+
+services:
+  web:
+    container_name: koma-app-standalone
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./input:/app/input
+      - ./processing:/app/processing
+      - ./results:/app/results
+      - ./templates:/app/templates
+      - ./main.py:/app/main.py
+      - ./agents:/app/agents
+      - ./tools:/app/tools
+      - ./schemas:/app/schemas
+      - ./rpd_app:/app/rpd_app
+      - app_data:/app/data
+      - ./web/app:/app/app
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_GENAI_USE_VERTEXAI=${GOOGLE_GENAI_USE_VERTEXAI:-FALSE}
+      - DB_PATH=/app/data/users.db
+      - DATA_DIR=/app/data
+      - PROJECT_ROOT=/app
+      - STORAGE_SECRET=${STORAGE_SECRET:-timplan-secret-key-change-me}
+      - NICEGUI_RELOAD=true
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  app_data:
+    driver: local

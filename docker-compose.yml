@@ -49,6 +49,7 @@ services:
     restart: unless-stopped
 
   web:
+    container_name: koma-app
     build:
       context: .
       dockerfile: web/Dockerfile

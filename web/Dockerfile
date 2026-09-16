@@ -10,11 +10,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Copy parent project source (agents, tools, templates, schemas) ───────────
+# ── Copy parent project source (agents, tools, templates, schemas, rpd_app) ──
 COPY agents/    ./agents/
 COPY tools/     ./tools/
 COPY templates/ ./templates/
 COPY schemas/   ./schemas/
+COPY rpd_app/   ./rpd_app/
 COPY .env.default ./.env.default
 COPY main.py ./main.py
 
