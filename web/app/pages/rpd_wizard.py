@@ -160,6 +160,7 @@ async def rpd_wizard_page(project_id: int):
                     in_sem.on_value_change(update_sem)
 
                 # ── Tab 3: Компетенции (З-У-В) ──────────────────────────────
+                comp_widget_list = []
                 with ui.tab_panel(t3):
                     ui.label("Декомпозиция индикаторов компетенций (Таблица 1):").classes("text-sm text-gray-400 mb-4")
                     comps_list = context.get("competencies_nested", [])
@@ -170,16 +171,18 @@ async def rpd_wizard_page(project_id: int):
                                 ind = comp["ind_first"]
                                 with ui.card().classes("w-full bg-slate-900/50 p-4 mb-2 border border-slate-700/50"):
                                     ui.label(f"Индикатор {ind.get('code')}: {ind.get('title', '')}").classes("font-semibold text-indigo-300 mb-2")
-                                    ind["know_inp"] = ui.input("Знать", value=ind.get("know", "")).props("outlined dark color=indigo").classes("w-full mb-2")
-                                    ind["able_inp"] = ui.input("Уметь", value=ind.get("able", "")).props("outlined dark color=indigo").classes("w-full mb-2")
-                                    ind["master_inp"] = ui.input("Владеть", value=ind.get("master", "")).props("outlined dark color=indigo").classes("w-full")
+                                    k_inp = ui.input("Знать", value=ind.get("know", "")).props("outlined dark color=indigo").classes("w-full mb-2")
+                                    a_inp = ui.input("Уметь", value=ind.get("able", "")).props("outlined dark color=indigo").classes("w-full mb-2")
+                                    m_inp = ui.input("Владеть", value=ind.get("master", "")).props("outlined dark color=indigo").classes("w-full")
+                                    comp_widget_list.append((ind, k_inp, a_inp, m_inp))
 
                             for oind in comp.get("other_indicators", []):
                                 with ui.card().classes("w-full bg-slate-900/50 p-4 mb-2 border border-slate-700/50"):
                                     ui.label(f"Индикатор {oind.get('code')}: {oind.get('title', '')}").classes("font-semibold text-indigo-300 mb-2")
-                                    oind["know_inp"] = ui.input("Знать", value=oind.get("know", "")).props("outlined dark color=indigo").classes("w-full mb-2")
-                                    oind["able_inp"] = ui.input("Уметь", value=oind.get("able", "")).props("outlined dark color=indigo").classes("w-full mb-2")
-                                    oind["master_inp"] = ui.input("Владеть", value=oind.get("master", "")).props("outlined dark color=indigo").classes("w-full")
+                                    k_inp = ui.input("Знать", value=oind.get("know", "")).props("outlined dark color=indigo").classes("w-full mb-2")
+                                    a_inp = ui.input("Уметь", value=oind.get("able", "")).props("outlined dark color=indigo").classes("w-full mb-2")
+                                    m_inp = ui.input("Владеть", value=oind.get("master", "")).props("outlined dark color=indigo").classes("w-full")
+                                    comp_widget_list.append((oind, k_inp, a_inp, m_inp))
 
                 # ── Tab 4: Тематический план ────────────────────────────────
                 with ui.tab_panel(t4):
@@ -192,12 +195,14 @@ async def rpd_wizard_page(project_id: int):
                             ui.badge(f"СРС: {s.get('srs', 0)} ч.", color="amber-9")
 
                 # ── Tab 5: Литература и разработчики ─────────────────────────
+                dev_widget_list = []
                 with ui.tab_panel(t5):
                     ui.label("Разработчики рабочей программы:").classes("text-sm font-semibold text-indigo-300 mb-2")
                     for dev in context.get("developers_list", []):
                         with ui.row().classes("w-full gap-4 mb-2"):
-                            dev["pos_inp"] = ui.input("Должность", value=dev.get("position", "")).props("outlined dark color=indigo").classes("flex-1")
-                            dev["fio_inp"] = ui.input("ФИО, ученая степень", value=dev.get("fio_rank", "")).props("outlined dark color=indigo").classes("flex-1")
+                            p_inp = ui.input("Должность", value=dev.get("position", "")).props("outlined dark color=indigo").classes("flex-1")
+                            f_inp = ui.input("ФИО, ученая степень", value=dev.get("fio_rank", "")).props("outlined dark color=indigo").classes("flex-1")
+                            dev_widget_list.append((dev, p_inp, f_inp))
 
                     ui.separator().classes("my-4").style("border-color: rgba(99,102,241,0.2);")
                     ui.label("Основная литература:").classes("text-sm font-semibold text-indigo-300 mb-2")
@@ -206,6 +211,20 @@ async def rpd_wizard_page(project_id: int):
 
             # ── Action Bar ────────────────────────────────────────────────────
             ui.separator().classes("my-6").style("border-color: rgba(99,102,241,0.2);")
+
+            def sanitize_for_json(data):
+                """Recursively strip non-serializable objects and keys ending with _inp."""
+                if isinstance(data, dict):
+                    return {
+                        k: sanitize_for_json(v)
+                        for k, v in data.items()
+                        if not k.endswith("_inp") and not hasattr(v, "props")
+                    }
+                elif isinstance(data, list):
+                    return [sanitize_for_json(item) for item in data if not hasattr(item, "props")]
+                elif isinstance(data, (str, int, float, bool)) or data is None:
+                    return data
+                return str(data)
 
             def save_ui_to_context():
                 context["direction_code"] = in_dir_code.value
@@ -252,28 +271,27 @@ async def rpd_wizard_page(project_id: int):
                 context["sem_1_srs_self_hours"] = context["srs_self_hours"]
 
                 # Save З-У-В inputs
-                for comp in context.get("competencies_nested", []):
-                    if comp.get("ind_first") and "know_inp" in comp["ind_first"]:
-                        comp["ind_first"]["know"] = comp["ind_first"]["know_inp"].value
-                        comp["ind_first"]["able"] = comp["ind_first"]["able_inp"].value
-                        comp["ind_first"]["master"] = comp["ind_first"]["master_inp"].value
-                    for oind in comp.get("other_indicators", []):
-                        if "know_inp" in oind:
-                            oind["know"] = oind["know_inp"].value
-                            oind["able"] = oind["able_inp"].value
-                            oind["master"] = oind["master_inp"].value
+                for target_dict, k_inp, a_inp, m_inp in comp_widget_list:
+                    target_dict["know"] = k_inp.value
+                    target_dict["able"] = a_inp.value
+                    target_dict["master"] = m_inp.value
 
                 # Save developer inputs
-                for dev in context.get("developers_list", []):
-                    if "pos_inp" in dev:
-                        dev["position"] = dev["pos_inp"].value
-                    if "fio_inp" in dev:
-                        dev["fio_rank"] = dev["fio_inp"].value
+                for target_dict, p_inp, f_inp in dev_widget_list:
+                    target_dict["position"] = p_inp.value
+                    target_dict["fio_rank"] = f_inp.value
+
+                # Clean any lingering widget or un-serializable references
+                clean_context = sanitize_for_json(context)
+                context.clear()
+                context.update(clean_context)
 
                 # Save to disk
                 proc_dir.mkdir(parents=True, exist_ok=True)
                 with open(context_file, "w", encoding="utf-8") as f:
-                    json.dump(context, f, indent=2, ensure_ascii=False)
+                    json.dump(clean_context, f, indent=2, ensure_ascii=False)
+
+                return clean_context
 
             rpd_status_label = ui.label("").classes("text-sm text-gray-300 mb-2")
             download_rpd_btn = ui.button("Скачать готовую РПД (.docx)", icon="download").props("color=positive size=md").classes("hidden")
