@@ -328,7 +328,32 @@ async def rpd_wizard_page(project_id: int):
                     username=user["username"],
                     project_name=proj_name
                 )
-                ui.navigate.to(f"/project/{project_id}/variables")
+
+                # Check if questions need to be generated via AI
+                variables_path = proc_dir / "variables.yml"
+                has_questions = False
+                if variables_path.exists():
+                    try:
+                        import yaml
+                        with open(variables_path, "r", encoding="utf-8") as vf:
+                            vdata = yaml.safe_load(vf) or {}
+                        acts = vdata.get("activities", [])
+                        if acts and any(a.get("questions") for a in acts):
+                            has_questions = True
+                    except Exception:
+                        pass
+
+                if not has_questions and os.environ.get("GOOGLE_API_KEY"):
+                    # Launch AI questions generation in background and navigate to live processing page
+                    from ..pipeline import read_parameters_env, run_questions_generation
+                    params = read_parameters_env(proc_dir / "parameters.env")
+                    background_tasks.create(
+                        run_questions_generation(project_id, user["username"], proj_name, params)
+                    )
+                    ui.notify("Запущена генерация вопросов и оценочных средств (AI Gemini)...", type="info")
+                    ui.navigate.to(f"/project/{project_id}/processing")
+                else:
+                    ui.navigate.to(f"/project/{project_id}/variables")
 
             with ui.row().classes("w-full justify-between items-center gap-4"):
                 with ui.row().classes("gap-3 items-center"):

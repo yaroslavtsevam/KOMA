@@ -35,6 +35,9 @@ def _find_project_root() -> Path:
 _PROJECT_ROOT = _find_project_root()
 
 
+MAX_TASK_TIMEOUT_SECONDS = 600.0  # 10 minutes maximum per task step
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _env_default_path() -> Path:
@@ -76,7 +79,10 @@ def load_env_defaults() -> dict:
 def read_parameters_env(env_path: Path) -> dict:
     params: dict = {}
     if not env_path.exists():
-        return params
+        try:
+            return load_env_defaults()
+        except Exception:
+            return params
     with open(env_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -108,7 +114,7 @@ async def _run_subprocess_step(
     regenerate: bool = False,
     extra_args: list = None
 ) -> bool:
-    """Executes main.py CLI step as an async subprocess and logs to pipeline.log."""
+    """Executes main.py CLI step as an async subprocess with a 10-minute timeout and logs to pipeline.log."""
     params = params or {}
     proc_dir = processing_dir(project_name)
     log_file_path = proc_dir / "pipeline.log"
@@ -127,11 +133,11 @@ async def _run_subprocess_step(
     for k, v in params.items():
         cmd.extend([f"--{k}", str(v)])
 
-    logger.info(f"Running pipeline subprocess: {' '.join(cmd)}")
+    logger.info(f"Running pipeline subprocess (timeout {MAX_TASK_TIMEOUT_SECONDS}s): {' '.join(cmd)}")
 
     with open(log_file_path, "a", encoding="utf-8") as log_f:
         log_f.write(f"\n==================================================\n")
-        log_f.write(f"STARTING STEP: {step.upper()}\n")
+        log_f.write(f"STARTING STEP: {step.upper()} (timeout: {int(MAX_TASK_TIMEOUT_SECONDS // 60)} min)\n")
         log_f.write(f"==================================================\n\n")
         log_f.flush()
 
@@ -142,7 +148,20 @@ async def _run_subprocess_step(
                 stderr=subprocess.STDOUT,
                 cwd=str(_PROJECT_ROOT)
             )
-            await process.wait()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=MAX_TASK_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                msg = f"\n[TIMEOUT] Превышен лимит времени выполнения задачи ({int(MAX_TASK_TIMEOUT_SECONDS // 60)} минут). Процесс принудительно остановлен.\n"
+                log_f.write(msg)
+                log_f.flush()
+                logger.error("Subprocess for step '%s' timed out after %s seconds. Terminating...", step, MAX_TASK_TIMEOUT_SECONDS)
+                try:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except (asyncio.TimeoutError, Exception):
+                    process.kill()
+                return False
+
             return process.returncode == 0
         except Exception as exc:
             log_f.write(f"\nFailed to launch subprocess: {exc}\n")
@@ -169,18 +188,26 @@ async def run_rpd_generation(
         res_dir = results_dir(project_name)
         proc_dir = processing_dir(project_name)
 
-        # Run generator
+        # Run generator with 10-minute timeout
         loop = asyncio.get_running_loop()
-        res = await loop.run_in_executor(
-            None,
-            lambda: generate_rpd_for_project(
-                project_name=project_name,
-                plan_pdf_path=plan_path,
-                course_name_or_code=course_name,
-                output_dir=str(res_dir),
-                custom_context=custom_context
+        try:
+            res = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: generate_rpd_for_project(
+                        project_name=project_name,
+                        plan_pdf_path=plan_path,
+                        course_name_or_code=course_name,
+                        output_dir=str(res_dir),
+                        custom_context=custom_context
+                    )
+                ),
+                timeout=MAX_TASK_TIMEOUT_SECONDS
             )
-        )
+        except asyncio.TimeoutError:
+            logger.error("RPD generation timed out after %s seconds for project %s", MAX_TASK_TIMEOUT_SECONDS, project_id)
+            update_project_status(project_id, "error", f"Превышен лимит времени генерации РПД ({int(MAX_TASK_TIMEOUT_SECONDS // 60)} минут)")
+            return
 
         rpd_docx_path = res["docx_path"]
         context_path = res["context_path"]
@@ -217,7 +244,7 @@ async def run_rpd_to_omd_bridge(
     project_name: str,
     params: dict = None
 ) -> None:
-    """Converts verified RPD context into OMD variables.yml."""
+    """Converts verified RPD context into OMD variables.yml, preserving any existing AI questions."""
     update_project_status(project_id, "processing_structure")
     try:
         from tools.rpd_to_omd_adapter import rpd_context_to_omd_variables
@@ -235,8 +262,16 @@ async def run_rpd_to_omd_bridge(
         with open(rpd_context_path, "r", encoding="utf-8") as f:
             rpd_ctx = json.load(f)
 
-        omd_data = rpd_context_to_omd_variables(rpd_ctx)
         variables_path = proc_dir / "variables.yml"
+        existing_vars = None
+        if variables_path.exists():
+            try:
+                with open(variables_path, "r", encoding="utf-8") as vf:
+                    existing_vars = yaml.safe_load(vf)
+            except Exception:
+                pass
+
+        omd_data = rpd_context_to_omd_variables(rpd_ctx, existing_variables=existing_vars)
         with open(variables_path, "w", encoding="utf-8") as f:
             yaml.dump(omd_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 

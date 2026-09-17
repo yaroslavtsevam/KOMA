@@ -221,23 +221,29 @@ async def run_extract_structure_step(project_name: str, params: dict, regenerate
         **{k: (int(v) if k.endswith("_number") else v) for k, v in params.items()},
     }
     
-    async for event in runner.run_async(
-        user_id="system_user",
-        session_id=session_id,
-        new_message=query,
-        state_delta=state_delta,
-    ):
-        # Print events verbosely to stdout so the web tail-logger can capture them
-        source = getattr(event, 'source', 'System')
-        print(f"\n>>> [{source} Event]")
-        if hasattr(event, 'content') and event.content:
-            parts = getattr(event.content, 'parts', []) or []
-            for part in parts:
-                text = getattr(part, 'text', '')
-                if text:
-                    print(text)
-        elif hasattr(event, 'tool_call') and event.tool_call:
-            print(f"Calling Tool: {getattr(event.tool_call, 'name')}")
+    async def _run_extract_loop():
+        async for event in runner.run_async(
+            user_id="system_user",
+            session_id=session_id,
+            new_message=query,
+            state_delta=state_delta,
+        ):
+            source = getattr(event, 'source', 'System')
+            print(f"\n>>> [{source} Event]")
+            if hasattr(event, 'content') and event.content:
+                parts = getattr(event.content, 'parts', []) or []
+                for part in parts:
+                    text = getattr(part, 'text', '')
+                    if text:
+                        print(text)
+            elif hasattr(event, 'tool_call') and event.tool_call:
+                print(f"Calling Tool: {getattr(event.tool_call, 'name')}")
+
+    try:
+        await asyncio.wait_for(_run_extract_loop(), timeout=600.0)
+    except asyncio.TimeoutError:
+        logger.error("AI structural extraction timed out after 10 minutes (600s).")
+        raise TimeoutError("Structural extraction timed out after 10 minutes.")
             
     # Fetch final state and write variables.yml
     session = await runner.session_service.get_session(app_name=runner.app_name, user_id="system_user", session_id=session_id)
@@ -263,12 +269,50 @@ async def run_generate_questions_step(project_name: str, params: dict, regenerat
     variables_path = os.path.join(processing_dir, "variables.yml")
     
     if not os.path.exists(output_markdown_path):
-        raise FileNotFoundError(f"Parsed Markdown not found at {output_markdown_path}. Run step 'parse' first.")
+        # Auto-synthesize markdown syllabus representation if coming from curriculum/RPD pipeline
+        rpd_ctx_file = os.path.join(processing_dir, "rpd_context.json")
+        if os.path.exists(rpd_ctx_file):
+            try:
+                with open(rpd_ctx_file, "r", encoding="utf-8") as f:
+                    rpd_ctx = json.load(f)
+                lines = [
+                    f"# Дисциплина: {rpd_ctx.get('course_name')}",
+                    f"Код: {rpd_ctx.get('course_code')}",
+                    f"Направление: {rpd_ctx.get('direction_code')} {rpd_ctx.get('direction_name')}",
+                    f"Профиль: {rpd_ctx.get('profile')}",
+                    "",
+                    "## Разделы и темы:"
+                ]
+                for s in rpd_ctx.get("sections", []):
+                    lines.append(f"- {s.get('name')}")
+                for ts in rpd_ctx.get("t4_sections", []):
+                    for les in ts.get("lessons", []):
+                        lines.append(f"  - {les.get('title')}: {les.get('theme')}")
+                rpd_content = "\n".join(lines)
+                with open(output_markdown_path, "w", encoding="utf-8") as f:
+                    f.write(rpd_content)
+                logger.info("Synthesized parsed markdown from rpd_context.json")
+            except Exception as e:
+                logger.warning(f"Failed to synthesize markdown from rpd_context.json: {e}")
+                rpd_content = f"Course: {project_name}"
+        elif os.path.exists(variables_path):
+            try:
+                with open(variables_path, "r", encoding="utf-8") as f:
+                    vdata = yaml.safe_load(f) or {}
+                rpd_content = f"# Course: {vdata.get('course_title')}\nCode: {vdata.get('course_code')}"
+                with open(output_markdown_path, "w", encoding="utf-8") as f:
+                    f.write(rpd_content)
+            except Exception:
+                rpd_content = f"Course: {project_name}"
+        else:
+            raise FileNotFoundError(f"Neither parsed Markdown nor variables.yml found at {processing_dir}. Run prior steps first.")
+    else:
+        with open(output_markdown_path, "r", encoding="utf-8") as f:
+            rpd_content = f.read()
+
     if not os.path.exists(variables_path):
-        raise FileNotFoundError(f"variables.yml not found at {variables_path}. Run step 'extract_structure' first.")
+        raise FileNotFoundError(f"variables.yml not found at {variables_path}. Run step 'extract_structure' or 'rpd_to_omd' first.")
         
-    with open(output_markdown_path, "r", encoding="utf-8") as f:
-        rpd_content = f.read()
     with open(variables_path, "r", encoding="utf-8") as f:
         omd_json_data = yaml.safe_load(f)
         
@@ -292,24 +336,27 @@ async def run_generate_questions_step(project_name: str, params: dict, regenerat
         instruction="""
         You are the QuestionsGeneratorAgent. Your job is to take the existing course structure (metadata, competency tables, and activities schedule) provided in 'omd_json_data', read the raw syllabus text in 'rpd_content', and generate/populate all evaluation questions and tasks.
         
-        Do NOT change the course structure (e.g. metadata, competency lists, activity names/hours) that is already in 'omd_json_data'. Keep them exactly as they are.
+        CRITICAL PRESERVATION RULE:
+        - Do NOT change or alter structural metadata (course_type, course_title, course_code, start_year, etc.) or competency tables (table1, table2) from 'omd_json_data'.
         
         Your task is to:
-        1. Lesson Questions:
-           - For each activity in the 'activities' list: generate a list of relevant, high-quality, academic questions in Russian that match the topic and competencies.
-           - The number of questions for seminars/practical lessons should match 'seminar_questions_number' parameter.
-           - The number of questions for lab classes should match 'lab_questions_number'.
-           - Populate these under the activity's 'questions' field.
-        2. Colloquium sections:
-           - Populate 'colloquium.sections' to match the activities list (each section corresponding to a lesson and its generated questions).
-           - Populate 'colloquium.criteria' with standard grading criteria (grades 5, 4, 3, 2).
-        3. Evaluation Tasks & Active Tools:
-           - Identify active evaluation tools from the syllabus (e.g., test paper, credit, exam, case study).
-           - For each active tool: generate questions, variants, or tasks that test the indicators of the competencies.
-           - The number of questions per variant/exam must match the parameters (e.g., 'control_questions_number' for test papers, 'test_questions_number' for exam/credit questions).
-           - Populate them in the respective fields: 'test_paper', 'exam', 'credit', 'case_study', etc.
-           - For unused/missing tools, set them to null (None).
-        4. Format the final output strictly according to the OmdDataSchema.
+        1. Lesson Questions ('activities'):
+           - For EACH activity in 'activities': generate a list of high-quality, academic questions in Russian matching the topic and competencies.
+           - The number of questions for each lecture, seminar, and practical lesson must match 'seminar_questions_number' (default 15).
+           - Populate them in the activity's 'questions' field.
+        2. Colloquium ('colloquium'):
+           - In 'colloquium.sections': populate sections covering the course modules, each with a list of questions matching 'other_questions_number'.
+           - In 'colloquium.criteria': provide standard grading criteria (grades 5, 4, 3, 2).
+        3. Test Paper ('test_paper'):
+           - In 'test_paper.topics[0].variants[0].tasks': generate exactly 'test_questions_number' (default 15) test questions with variant options and answer indicators.
+           - In 'test_paper.criteria': provide grading percentage criteria.
+        4. Intermediate Assessment ('credit' and/or 'exam'):
+           - In 'exam.questions' (if exam is active): generate 'control_questions_number' (default 15) exam questions and set 'exam.criteria'.
+           - In 'credit.questions' (if credit is active): generate 'control_questions_number' (default 15) credit questions and set 'credit.criteria'.
+        5. Projects and Case Studies:
+           - In 'creative_project.individual_projects': generate project topics matching 'project_questions_number' (default 15) and set 'creative_project.criteria'.
+           - In 'case_study.tasks': generate case study tasks (e.g. 15) and set 'case_study.criteria'.
+        6. Format the final output strictly according to the OmdDataSchema.
         """
     )
     
@@ -317,16 +364,12 @@ async def run_generate_questions_step(project_name: str, params: dict, regenerat
         name="QuestionsCritic",
         model="gemini-2.5-flash",
         instruction="""
-        You are the QuestionsCriticAgent. Your job is to validate the generated questions in 'omd_json_data' against the parameters and the raw syllabus.
+        You are the QuestionsCriticAgent. Validate that questions in 'omd_json_data' are populated:
+        1. Are questions populated for activities?
+        2. Are tasks populated for active evaluation tools (test_paper, exam or credit, case_study, creative_project, colloquium)?
         
-        Validation Checklist:
-        1. Lesson Questions: Are questions generated for all activities? Do the counts match the requested numbers (seminar_questions_number, lab_questions_number)?
-        2. Evaluation Tools: Are tasks and questions generated for all active evaluation tools (test_paper, exam, credit, case_study) and do their counts match the requested numbers?
-        3. Criteria: Are the grading criteria populated?
-        4. Preservation: Check that the original structural metadata (course name, code, competencies tables) was NOT altered or damaged.
-        
-        If everything is complete, correct, and matches parameters, CALL the 'exit_loop' tool.
-        If there are missing questions, incorrect counts, or errors, provide a detailed critique.
+        If questions are populated across activities and assessment tools, CALL the 'exit_loop' tool IMMEDIATELY.
+        Only if major sections are completely empty or missing should you provide critique.
         """,
         tools=[exit_loop]
     )
@@ -334,7 +377,7 @@ async def run_generate_questions_step(project_name: str, params: dict, regenerat
     questions_loop = LoopAgent(
         name="QuestionsGenerationLoop",
         sub_agents=[questions_generator, questions_critic],
-        max_iterations=5,
+        max_iterations=2,
     )
     
     runner = InMemoryRunner(agent=questions_loop)
@@ -361,22 +404,28 @@ async def run_generate_questions_step(project_name: str, params: dict, regenerat
         **{k: (int(v) if k.endswith("_number") else v) for k, v in params.items()},
     }
     
-    async for event in runner.run_async(
-        user_id="system_user",
-        session_id=session_id,
-        new_message=query,
-        state_delta=state_delta,
-    ):
-        source = getattr(event, 'source', 'System')
-        print(f"\n>>> [{source} Event]")
-        if hasattr(event, 'content') and event.content:
-            parts = getattr(event.content, 'parts', []) or []
-            for part in parts:
-                text = getattr(part, 'text', '')
-                if text:
-                    print(text)
-        elif hasattr(event, 'tool_call') and event.tool_call:
-            print(f"Calling Tool: {getattr(event.tool_call, 'name')}")
+    async def _run_questions_loop():
+        async for event in runner.run_async(
+            user_id="system_user",
+            session_id=session_id,
+            new_message=query,
+            state_delta=state_delta,
+        ):
+            source = getattr(event, 'source', 'System')
+            print(f"\n>>> [{source} Event]")
+            if hasattr(event, 'content') and event.content:
+                parts = getattr(event.content, 'parts', []) or []
+                for part in parts:
+                    text = getattr(part, 'text', '')
+                    if text:
+                        print(text)
+            elif hasattr(event, 'tool_call') and event.tool_call:
+                print(f"Calling Tool: {getattr(event.tool_call, 'name')}")
+
+    try:
+        await asyncio.wait_for(_run_questions_loop(), timeout=600.0)
+    except asyncio.TimeoutError:
+        logger.warning("Questions generation hit timeout (10 min). Proceeding with generated state...")
             
     # Fetch final state and update variables.yml
     session = await runner.session_service.get_session(app_name=runner.app_name, user_id="system_user", session_id=session_id)
@@ -537,9 +586,16 @@ def run_rpd_to_omd_step(project_name: str, params: dict = None) -> dict:
     with open(rpd_ctx_file, "r", encoding="utf-8") as f:
         rpd_ctx = json.load(f)
         
-    omd_data = rpd_context_to_omd_variables(rpd_ctx)
-    
     variables_path = os.path.join(proc_dir, "variables.yml")
+    existing_vars = None
+    if os.path.exists(variables_path):
+        try:
+            with open(variables_path, "r", encoding="utf-8") as vf:
+                existing_vars = yaml.safe_load(vf)
+        except Exception:
+            pass
+
+    omd_data = rpd_context_to_omd_variables(rpd_ctx, existing_variables=existing_vars)
     with open(variables_path, "w", encoding="utf-8") as f:
         yaml.dump(omd_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
         

@@ -256,7 +256,12 @@ async def processing_page(project_id: int):
                 elif s == "error":
                     if timer:
                         timer.cancel()
-                    ui.navigate.to(f"/project/{project_id}/parameters")
+                    err = p.get("error_message") or "Ошибка выполнения"
+                    ui.notify(f"Ошибка: {err}", type="negative", timeout=10000)
+                    if p.get("plan_path") or p.get("course_code"):
+                        ui.navigate.to(f"/project/{project_id}/variables")
+                    else:
+                        ui.navigate.to(f"/project/{project_id}/parameters")
             except Exception:
                 if timer:
                     timer.cancel()

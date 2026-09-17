@@ -347,19 +347,37 @@ async def variables_page(project_id: int):
 
                 ui.button("Сохранить", icon="save", on_click=do_save).props("flat").classes("text-indigo-300")
 
-                # Allow direct OMD generation if questions are present or if has_plan
+                # Check whether activities have questions
                 has_questions = False
                 acts = data.get("activities", [])
                 if acts and any(a.get("questions") for a in acts):
                     has_questions = True
 
-                if not has_questions and is_structure_only and not has_plan:
-                    ui.button("Генерация вопросов →", icon="psychology", on_click=do_generate_questions).classes("success-btn")
-                else:
-                    with ui.row().classes("gap-2"):
+                with ui.row().classes("gap-2 items-center"):
+                    if not has_questions:
                         if os.environ.get("GOOGLE_API_KEY"):
-                            ui.button("AI Вопросы", icon="psychology", on_click=do_generate_questions).props("outline color=indigo")
+                            ui.button("Сгенерировать вопросы (AI Gemini) →", icon="psychology", on_click=do_generate_questions).classes("success-btn")
+                        ui.button("Сгенерировать без вопросов (.docx)", icon="description", on_click=do_generate_docx).props("outline color=grey")
+                    else:
+                        if os.environ.get("GOOGLE_API_KEY"):
+                            ui.button("Перегенерировать AI", icon="refresh", on_click=do_generate_questions).props("outline color=indigo")
                         ui.button("Сгенерировать ОМД (.docx) →", icon="description", on_click=do_generate_docx).classes("success-btn")
+
+        if not has_questions:
+            with ui.card().classes("w-full mb-4 bg-amber-950/40 border border-amber-500/50 p-4 rounded-xl"):
+                with ui.row().classes("items-center justify-between w-full"):
+                    with ui.row().classes("items-center gap-3"):
+                        ui.icon("warning", color="amber", size="1.8rem")
+                        with ui.column().classes("gap-0"):
+                            ui.label("Вопросы к занятиям и оценочные материалы еще не сгенерированы!").classes("font-semibold text-amber-300 text-sm")
+                            ui.label("Нажмите «Сгенерировать вопросы (AI Gemini)», чтобы автоматически заполнить вопросы для всех лекций, практик, тестов и зачета/экзамена.").classes("text-xs text-amber-200/80")
+                    if os.environ.get("GOOGLE_API_KEY"):
+                        ui.button("Сгенерировать вопросы (AI Gemini) →", icon="psychology", on_click=do_generate_questions).classes("success-btn")
+        else:
+            with ui.card().classes("w-full mb-4 bg-indigo-950/40 border border-indigo-500/40 p-3 rounded-xl"):
+                with ui.row().classes("items-center gap-2"):
+                    ui.icon("check_circle", color="positive", size="1.2rem")
+                    ui.label("✓ Оценочные материалы и вопросы сгенерированы с помощью AI Gemini.").classes("text-xs text-indigo-200")
 
         # ── Tabs for logical grouping ─────────────────────────────────────────
         with ui.tabs().props("dark active-color=indigo indicator-color=indigo").classes("mb-2") as tabs:
@@ -455,7 +473,7 @@ async def variables_page(project_id: int):
                     )).props("flat").classes("text-gray-400")
                     ui.button("Сохранить", icon="save", on_click=do_save).classes("primary-btn")
                     
-                    if is_structure_only:
-                        ui.button("Генерация вопросов →", icon="psychology", on_click=do_generate_questions).classes("success-btn")
+                    if not has_questions and os.environ.get("GOOGLE_API_KEY"):
+                        ui.button("Сгенерировать вопросы (AI Gemini) →", icon="psychology", on_click=do_generate_questions).classes("success-btn")
                     else:
-                        ui.button("Сгенерировать Word документ →", icon="description", on_click=do_generate_docx).classes("success-btn")
+                        ui.button("Сгенерировать Word документ (.docx) →", icon="description", on_click=do_generate_docx).classes("success-btn")
