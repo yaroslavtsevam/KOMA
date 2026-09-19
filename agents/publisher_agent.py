@@ -1,9 +1,12 @@
+import os
 from google.adk.agents import LlmAgent
 from tools.docx_generator_tool import docx_generator_tool
 
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
+
 publisher_agent = LlmAgent(
     name="PublisherAgent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are the PublisherAgent. Your sole job is to call the 'docx_generator_tool' to compile and 
     render the final Word report.

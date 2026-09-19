@@ -1,3 +1,4 @@
+import os
 from google.adk.agents import LlmAgent
 
 try:
@@ -5,16 +6,16 @@ try:
 except ImportError:
     from google.adk.tools import ToolContext
 
-def exit_loop(tool_context: ToolContext) -> dict:
-    """
-    Signals that the validation succeeded and the LoopAgent can terminate.
-    """
-    tool_context.actions.escalate = True
-    return {"status": "success", "message": "Critic approved the data and terminated the quality loop."}
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
+
+# Tool for exiting the loop when validation passes
+def exit_loop():
+    """Exit the iterative loop when the structure is completely valid."""
+    return {"status": "valid"}
 
 critic_agent = LlmAgent(
     name="CriticAgent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are the CriticAgent. Your job is to validate the structured JSON data stored in 'omd_json_data' 
     against the raw syllabus content in 'rpd_content'.

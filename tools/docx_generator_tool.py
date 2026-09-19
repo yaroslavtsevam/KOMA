@@ -1,11 +1,14 @@
 import os
 import re
+import copy
 import logging
 import yaml
 from docx import Document
 from docx.enum.text import WD_COLOR_INDEX, WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.shared import RGBColor, Inches, Pt
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
 from docxtpl import DocxTemplate
 
 DEFAULT_LECTURE_CRITERIA = """| Оценка | Критерии оценивания |
@@ -29,12 +32,12 @@ DEFAULT_CREDIT_CRITERIA = """| Оценка | Критерии оцениван�
 | Пороговый уровень «3» (удовлетворительно) | оценку «удовлетворительно» заслуживает студент, частично с пробелами освоивший знания, умения, компетенции и теоретический материал, многие учебные задания либо не выполнил, либо они оценены числом баллов близким к минимальному, некоторые практические навыки не сформированы. |
 | Минимальный уровень «2» (неудовлетворительно) | оценку «неудовлетворительно» заслуживает студент, не освоивший знания, умения, компетенции и теоретический материал, учебные задания не выполнил, практические навыки не сформированы. """
 
-DEFAULT_TEST_PAPER_CRITERIA = """| Шкала оценивания, % правильных ответов от максимально возможного | Оценка |
-|---|---|
-| 80-100 | Высокий уровень «5» (отлично) |
-| 65-79 | Средний уровень «4» (хорошо) |
-| 50-64 | Пороговый уровень «3» (удовлетворительно) |
-| 49 и менее | Минимальный уровень «2» (неудовлетворительно) """
+DEFAULT_TEST_PAPER_CRITERIA = """| Шкала оценивания, % правильных ответов | Оценка | Характеристика уровня сформированности компетенций |
+|---|---|---|
+| 85–100% | Высокий уровень «5» (отлично) | Студент демонстрирует глубокое знание теоретического материала и терминологии, безошибочно выполнил расчетные и аналитические задания контрольной работы, логично и аргументированно обосновал полученные результаты. |
+| 70–84% | Средний уровень «4» (хорошо) | Студент в полной мере освоил программный материал, правильно решил основные расчетно-аналитические задачи, однако допустил непринципиальные неточности или погрешности в вычислениях и оформлении. |
+| 50–69% | Пороговый уровень «3» (удовлетворительно) | Студент продемонстрировал базовые знания основных понятий курса, справился с выполнением типовых заданий контрольной работы, но допустил существенные ошибки при решении сложных задач или не дал им должного обоснования. |
+| менее 50% | Минимальный уровень «2» (неудовлетворительно) | Студент не освоил программный материал темы, контрольные задания не выполнены либо содержат грубые методические и расчетные ошибки, компетенции не сформированы. |"""
 
 try:
     from google.adk.tools.tool_context import ToolContext
@@ -260,7 +263,20 @@ def insert_table_at_paragraph(doc, paragraph, table_rows):
                     r.font.highlight_color = None
 
     parent = paragraph._element.getparent()
-    parent.insert(parent.index(paragraph._element), table._tbl)
+    p_idx = parent.index(paragraph._element)
+    parent.insert(p_idx, table._tbl)
+
+    # Insert vertical spacing paragraph after table
+    spacer_p = doc.add_paragraph()
+    spacer_p.paragraph_format.space_before = Pt(6)
+    spacer_p.paragraph_format.space_after = Pt(6)
+    spacer_p.paragraph_format.line_spacing = 1.15
+    for r in spacer_p.runs:
+        r.font.name = "Times New Roman"
+        r.font.size = Pt(12)
+    tbl_idx = parent.index(table._tbl)
+    parent.insert(tbl_idx + 1, spacer_p._element)
+
     paragraph._element.getparent().remove(paragraph._element)
 
 def apply_visual_styling(doc_path):
@@ -334,9 +350,153 @@ def apply_visual_styling(doc_path):
                         if r.font.color and r.font.color.rgb:
                             r.font.color.rgb = None
                         r.font.highlight_color = None
+
+    # 4. Post-process Table 2 (vertical merge for competency code and content)
+    postprocess_omd_table_2(doc)
+
+    # 5. Post-process Test Paper questions formatting
+    postprocess_omd_test_paper(doc)
                         
     doc.save(doc_path)
     logger.info("Visual styling normalization successfully applied!")
+
+def postprocess_omd_test_paper(doc):
+    """
+    Форматирование тестовых заданий ОМД:
+    Разбивает каждый вопрос с вариантами ответа на:
+    1) Абзац вопроса с двоеточием/вопросительным знаком на конце и отступом
+    2) Отдельные абзацы вариантов ответа (1), 2), 3), 4) или а), б), в), г))
+       со стилем 'List Paragraph', левым отступом и шрифтом Times New Roman 12pt
+    3) Абзац ключа (Правильный ответ: ...) курсивом.
+    """
+    test_p_indices = []
+    for idx, p in enumerate(doc.paragraphs):
+        t = p.text.strip()
+        # Look for questions that contain multiple-choice options
+        if ("1)" in t or "а)" in t or "A)" in t) and ("2)" in t or "б)" in t or "B)" in t):
+            if re.search(r'(?:^|\s|\n)[1-4]\)\s+', t) or re.search(r'(?:^|\s|\n)[a-dа-г]\)\s+', t, re.IGNORECASE):
+                test_p_indices.append((idx, p))
+            
+    if not test_p_indices:
+        return
+
+    # Regex for splitting options: 1) or a) or A) or а) or А)
+    opt_pattern = re.compile(r'(?:(?:\r?\n|\s+)(?:[1-4]\)|[a-dа-г]\))\s+)', re.IGNORECASE)
+    ans_pattern = re.compile(r'(?:\r?\n|\s+)(\(?(?:Правильный\s+ответ|Ответ):\s*[^)]+\)?|\(?Ключ:\s*[^)]+\)?)', re.IGNORECASE)
+
+    for _, p in reversed(test_p_indices):
+        raw = p.text.strip()
+        
+        # Check for answer key
+        ans_match = ans_pattern.search(raw)
+        ans_text = ""
+        if ans_match:
+            ans_text = ans_match.group(1).strip()
+            raw = raw[:ans_match.start()].strip()
+            
+        parts = opt_pattern.split(raw)
+        if len(parts) <= 1:
+            continue
+            
+        q_text = parts[0].strip()
+        # Ensure question ends with colon or question mark
+        if not q_text.endswith(":") and not q_text.endswith("?"):
+            if q_text.endswith("."):
+                q_text = q_text[:-1] + ":"
+            else:
+                q_text = q_text + ":"
+                
+        # Find option markers
+        markers = opt_pattern.findall(raw)
+        options = []
+        for m, body in zip(markers, parts[1:]):
+            cleaned_m = m.strip()
+            cleaned_b = body.strip()
+            options.append(f"{cleaned_m} {cleaned_b}")
+            
+        # Update original paragraph with question text
+        p.text = q_text
+        p.style = doc.styles['Normal']
+        p.paragraph_format.space_before = Pt(6)
+        p.paragraph_format.space_after = Pt(4)
+        p.paragraph_format.line_spacing = 1.15
+        for r in p.runs:
+            r.font.name = "Times New Roman"
+            r.font.size = Pt(12)
+            r.font.color.rgb = RGBColor(0, 0, 0)
+            
+        # Insert option paragraphs after p
+        curr = p
+        list_style = doc.styles['List Paragraph'] if 'List Paragraph' in doc.styles else doc.styles['Normal']
+        for opt in options:
+            new_p = doc.add_paragraph()
+            new_p.text = opt
+            new_p.style = list_style
+            new_p.paragraph_format.left_indent = Inches(0.35)
+            new_p.paragraph_format.space_before = Pt(1)
+            new_p.paragraph_format.space_after = Pt(2)
+            new_p.paragraph_format.line_spacing = 1.15
+            for r in new_p.runs:
+                r.font.name = "Times New Roman"
+                r.font.size = Pt(12)
+                r.font.color.rgb = RGBColor(0, 0, 0)
+            curr._p.addnext(new_p._p)
+            curr = new_p
+            
+        if ans_text:
+            key_p = doc.add_paragraph()
+            key_p.text = ans_text
+            key_p.paragraph_format.left_indent = Inches(0.35)
+            key_p.paragraph_format.space_before = Pt(2)
+            key_p.paragraph_format.space_after = Pt(6)
+            key_p.paragraph_format.line_spacing = 1.15
+            for r in key_p.runs:
+                r.font.name = "Times New Roman"
+                r.font.size = Pt(11)
+                r.font.italic = True
+                r.font.color.rgb = RGBColor(80, 80, 80)
+            curr._p.addnext(key_p._p)
+            curr = key_p
+
+def postprocess_omd_table_2(doc):
+    """
+    Таблица 2 ОМД: вертикальное объединение ячеек Кода компетенции (col 1) 
+    и Содержания компетенции (col 2) для строк, относящихся к одной компетенции.
+    """
+    w_ns = nsdecls("w")
+    target_table = None
+    for t in doc.tables:
+        if len(t.columns) == 7 or (len(t.rows) > 0 and len(t.rows[0].cells) == 7):
+            header_text = " ".join(c.text.lower() for c in t.rows[0].cells)
+            if "индикаторы" in header_text or "компетенции" in header_text:
+                target_table = t
+                break
+                
+    if not target_table or len(target_table.rows) <= 2:
+        return
+        
+    current_code = None
+    for r_idx in range(2, len(target_table.rows)):
+        row = target_table.rows[r_idx]
+        comp_code = row.cells[1].text.strip()
+        if not comp_code:
+            continue
+            
+        if comp_code != current_code:
+            current_code = comp_code
+            for c_idx in [1, 2]:
+                tc = row.cells[c_idx]._tc
+                tcPr = tc.get_or_add_tcPr()
+                for old in tcPr.xpath('./w:vMerge'):
+                    tcPr.remove(old)
+                tcPr.append(parse_xml(f'<w:vMerge {w_ns} w:val="restart"/>'))
+        else:
+            for c_idx in [1, 2]:
+                tc = row.cells[c_idx]._tc
+                tcPr = tc.get_or_add_tcPr()
+                for old in tcPr.xpath('./w:vMerge'):
+                    tcPr.remove(old)
+                tcPr.append(parse_xml(f'<w:vMerge {w_ns}/>'))
 
 def determine_discipline_or_module(rpd_content: str) -> str:
     content_lower = rpd_content.lower()
@@ -767,17 +927,73 @@ def docx_generator_tool(tool_context: ToolContext, template_path: str = "templat
         else:
             data["cathedra_meeting_year"] = protocol_year
             
-        # Render utilizing docxtpl
-        doc_tpl = DocxTemplate(template_path)
-        for key in SECTIONS.values():
-            if key not in data or data[key] is None:
-                data[key] = None
-        if "protocol_num" not in data: data["protocol_num"] = "__"
-        if "protocol_day" not in data: data["protocol_day"] = "__"
-        if "protocol_month" not in data: data["protocol_month"] = "___________"
-        if "protocol_year" not in data: data["protocol_year"] = "20__"
-        
-        # Write all dynamic template variables to variables.yml
+        # Case study label (Задание if 1, Задания if >1)
+        cs_tasks = []
+        if isinstance(data.get("case_study"), dict):
+            cs_tasks = data["case_study"].get("tasks", [])
+        data["case_study_tasks_label"] = "Задание" if len(cs_tasks) <= 1 else "Задания"
+
+        # Colloquium vs Oral questions heading
+        has_colloquium = False
+        for act in data.get("activities", []):
+            et = str(act.get("eval_tool", "")).lower()
+            ct = str(act.get("control", "")).lower()
+            if "коллоквиум" in et or "коллоквиум" in ct:
+                has_colloquium = True
+                break
+        data["has_colloquium"] = has_colloquium
+        data["questions_section_title"] = "Вопросы для коллоквиумов, собеседования" if has_colloquium else "Вопросы для устного опроса, собеседования"
+
+        # Load rpd_context for reviewer, developers and department head
+        proc_rpd_path = os.path.join(processing_dir, "rpd_context.json")
+        rpd_ctx = {}
+        if os.path.exists(proc_rpd_path):
+            try:
+                with open(proc_rpd_path, "r", encoding="utf-8") as rf:
+                    rpd_ctx = json.load(rf)
+            except Exception:
+                pass
+
+        reviewer = data.get("reviewer") or rpd_ctx.get("reviewer_fio_rank") or "Борисов Б.А., д.б.н., профессор"
+        data["reviewer"] = reviewer
+        reviewer_full = rpd_ctx.get("reviewer_fio_rank_full")
+        if not reviewer_full:
+            reviewer_full = f"{reviewer}, (далее по тексту рецензент)"
+        data["reviewer_full_intro"] = reviewer_full
+
+        dev_list = rpd_ctx.get("developers_list") or []
+        if dev_list:
+            dev_str = ", ".join(f"{d.get('fio_rank', '')}, {d.get('position', '')}" for d in dev_list if d.get('fio_rank'))
+        else:
+            dev_str = rpd_ctx.get("developer_fio_rank", "Тихоновой М.В., к.б.н., доцентом кафедры")
+        data["developers_intro"] = dev_str
+
+        data["department_head_fio"] = rpd_ctx.get("department_head_fio") or data.get("department_head_fio") or "М.В. Тихонова"
+
+        # Format test questions with indented options and Listing for docxtpl
+        from docxtpl import Listing
+        import re
+
+        def _format_task_with_options(val):
+            if not isinstance(val, str):
+                return val
+            m = re.search(r'^(.*?)\s*\(Варианты:\s*(.*?)\)\s*$', val, re.IGNORECASE)
+            if m:
+                q_text = m.group(1).strip()
+                opts_raw = m.group(2).strip()
+                opts = [o.strip() for o in opts_raw.split(";") if o.strip()]
+                letters = ["а", "б", "в", "г", "д", "е"]
+                formatted_opts = []
+                for idx, opt in enumerate(opts):
+                    prefix = letters[idx] if idx < len(letters) else str(idx + 1)
+                    clean_opt = re.sub(r'^[a-zа-яA-ZА-Я0-9][\)\.]\s*', '', opt).strip()
+                    formatted_opts.append(f"   {prefix}) {clean_opt}")
+                return Listing(q_text + "\n" + "\n".join(formatted_opts))
+            elif "\n" in val:
+                return Listing(val)
+            return val
+
+        # Write all dynamic template variables to variables.yml BEFORE docxtpl formatting
         variables_path = os.path.join(processing_dir, "variables.yml")
         if not (os.path.exists(variables_path) and not regenerate):
             try:
@@ -786,8 +1002,26 @@ def docx_generator_tool(tool_context: ToolContext, template_path: str = "templat
                 logger.info(f"Saved template variables to {variables_path}")
             except Exception as ex:
                 logger.warning(f"Could not save template variables to YAML: {ex}")
+
+        # Deepcopy data for docxtpl rendering so Listing objects are not saved into variables.yml
+        render_data = copy.deepcopy(data)
+        if isinstance(render_data.get("test_paper"), dict):
+            for topic in render_data["test_paper"].get("topics", []):
+                for var in topic.get("variants", []):
+                    if "tasks" in var and isinstance(var["tasks"], list):
+                        var["tasks"] = [_format_task_with_options(t) for t in var["tasks"]]
+
+        # Render utilizing docxtpl
+        doc_tpl = DocxTemplate(template_path)
+        for key in SECTIONS.values():
+            if key not in render_data or render_data[key] is None:
+                render_data[key] = None
+        if "protocol_num" not in render_data: render_data["protocol_num"] = "__"
+        if "protocol_day" not in render_data: render_data["protocol_day"] = "__"
+        if "protocol_month" not in render_data: render_data["protocol_month"] = "___________"
+        if "protocol_year" not in render_data: render_data["protocol_year"] = "20__"
             
-        doc_tpl.render(data)
+        doc_tpl.render(render_data)
         doc_tpl.save(output_path)
         
         # 6. In-place XML insertion for criteria tables

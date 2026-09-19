@@ -71,6 +71,9 @@ def generate_rpd_for_project(
         with open(teach_plan_dir / "03_competencies_indicators.json", "w", encoding="utf-8") as f:
             json.dump(comps, f, indent=2, ensure_ascii=False)
     
+    from rpd_app.core.docx_generator import sanitize_section2_text
+    context = sanitize_section2_text(context)
+
     with open(teach_plan_dir / "rpd_context.json", "w", encoding="utf-8") as f:
         json.dump(context, f, indent=2, ensure_ascii=False)
 

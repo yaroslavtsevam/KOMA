@@ -135,3 +135,21 @@ class OmdDataSchema(BaseModel):
     course_work: Optional[CourseWorkTask] = Field(None, description="Course work/project topics and criteria")
     credit: Optional[ExamCreditTask] = Field(None, description="Questions and criteria for credit (зачёт)")
     exam: Optional[ExamCreditTask] = Field(None, description="Questions and criteria for exam (экзамен)")
+
+
+class ActivityQuestionsItem(BaseModel):
+    num: str = Field(..., description="Activity identifier or number, e.g., 'Лекция № 1', 'Практическое занятие № 1'")
+    questions: List[str] = Field(default_factory=list, description="List of targeted control questions for this lesson (3 to 5 questions)")
+
+
+class OmdQuestionsPatchSchema(BaseModel):
+    activity_questions: List[ActivityQuestionsItem] = Field(
+        default_factory=list,
+        description="List of questions for each syllabus activity/lesson"
+    )
+    colloquium: Optional[ColloquiumTask] = Field(None, description="Colloquium questions and criteria")
+    test_paper: Optional[TestPaperTask] = Field(None, description="Test paper questions with variants and criteria")
+    case_study: Optional[CaseStudyTask] = Field(None, description="Practical case study tasks and criteria")
+    creative_project: Optional[CreativeProjectTask] = Field(None, description="Creative individual/group projects and criteria")
+    credit: Optional[ExamCreditTask] = Field(None, description="Credit questions and criteria (if credit)")
+    exam: Optional[ExamCreditTask] = Field(None, description="Exam questions and criteria (if exam)")

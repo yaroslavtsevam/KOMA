@@ -60,8 +60,88 @@ def postprocess_table_1(doc):
                 tcPr.append(parse_xml(f'<w:vMerge {w_ns}/>'))
 
 
-def postprocess_table_2(doc):
-    """Таблица 2: Удаление строк с нулевыми часами для неактуальных видов работ."""
+def sanitize_section2_text(context: dict) -> dict:
+    """Очищает поля Раздела 2 от задвоения вводных фраз шаблона."""
+    if not isinstance(context, dict):
+        return context
+
+    # 1. prerequisites_text
+    prereq = context.get("prerequisites_text", "")
+    if isinstance(prereq, str) and prereq:
+        prereq = re.sub(
+            r"^(?:Освоение\s+дисциплины\s+(?:непосредственно\s+)?базируется\s+на\s+(?:результатах\s+обучения\s+по\s+)?(?:предшествующим\s+дисциплинам|предшествующих\s+дисциплинах|курсах)?[:\s]*|"
+            r"Предшествующими\s+(?:курсами|дисциплинами)(?:,\s*на\s+которых\s+базируется\s+дисциплина,)?\s+являются[:\s]*|"
+            r"К\s+предшествующим\s+(?:курсам|дисциплинам)\s+относятся[:\s]*|"
+            r"В\s+качестве\s+пререквизитов\s+(?:выступают|используются)[:\s]*|"
+            r"Изучение\s+дисциплины\s+базируется\s+на[:\s]*|"
+            r"Базируется\s+на[:\s]*)",
+            "",
+            prereq,
+            flags=re.IGNORECASE
+        ).strip()
+        context["prerequisites_text"] = prereq
+
+    # 2. postrequisites_text
+    postreq = context.get("postrequisites_text", "")
+    if isinstance(postreq, str) and postreq:
+        postreq = re.sub(
+            r"^(?:Освоение\s+дисциплины\s+необходимо\s+для\s+(?:последующего\s+изучения\s+дисциплин\s+и\s+прохождения\s+практик|последующих\s+дисциплин)?[:\s]*|"
+            r"Последующими\s+(?:курсами|дисциплинами)\s+являются[:\s]*|"
+            r"К\s+последующим\s+(?:курсам|дисциплинам)\s+относятся[:\s]*|"
+            r"Необходимо\s+для\s+(?:последующего\s+изучения|изучения)?[:\s]*|"
+            r"В\s+качестве\s+постреквизитов\s+(?:выступают|используются)[:\s]*)",
+            "",
+            postreq,
+            flags=re.IGNORECASE
+        ).strip()
+        context["postrequisites_text"] = postreq
+
+    # 3. corequisites_text
+    coreq = context.get("corequisites_text", "")
+    if isinstance(coreq, str) and coreq:
+        coreq = re.sub(
+            r"^(?:(?:В\s+[^\n,:]+семестре\s+)?параллельно\s+изучаются\s+дисциплины[:\s]*|"
+            r"Параллельно\s+изучаемыми\s+дисциплинами\s+являются[:\s]*|"
+            r"К\s+параллельно\s+изучаемым\s+дисциплинам\s+относятся[:\s]*|"
+            r"Дисциплины\s+параллельного\s+освоения[:\s]*)",
+            "",
+            coreq,
+            flags=re.IGNORECASE
+        ).strip()
+        context["corequisites_text"] = coreq
+
+    # 4. course_features_text
+    feat = context.get("course_features_text", "")
+    if isinstance(feat, str) and feat:
+        feat = re.sub(
+            r"^(?:Особенностью\s+дисциплины\s+является[:\s]*|"
+            r"Особенности\s+дисциплины\s+заключаются\s+в\s+том,\s*что[:\s]*|"
+            r"К\s+особенностям\s+дисциплины\s+относятся?[:\s]*|"
+            r"Особенность\s+курса[:\s]*)",
+            "",
+            feat,
+            flags=re.IGNORECASE
+        ).strip()
+        if re.match(r"^дисциплина\s+носит\s+", feat, flags=re.IGNORECASE):
+            feat = re.sub(r"^дисциплина\s+носит\s+", "", feat, flags=re.IGNORECASE)
+        if feat and feat[0].isupper() and not feat.startswith("«"):
+            feat = feat[0].lower() + feat[1:]
+        context["course_features_text"] = feat
+
+    # 5. BRS assessment text
+    use_brs = context.get("use_brs", True)
+    if "brs_assessment_text" not in context or not context["brs_assessment_text"]:
+        context["brs_assessment_text"] = (
+            "Для аттестации обучающихся используется балльно-рейтинговая система (БРС) оценивания."
+            if use_brs else
+            "Для аттестации обучающихся используется традиционная система оценивания."
+        )
+
+    return context
+
+
+def postprocess_table_2(doc, context=None):
+    """Таблица 2: Удаление строк с нулевыми часами и устранение пустой 4-й колонки для 1-семестровых курсов."""
     t2 = doc.tables[2]
     rows_to_delete = []
     for r_idx in range(len(t2.rows) - 1, -1, -1):
@@ -69,7 +149,8 @@ def postprocess_table_2(doc):
         name_cell = row.cells[0].text.strip()
         if any(h in name_cell for h in [
             "Вид учебной работы", "Общая трудоёмкость", "1. Контактная работа",
-            "Аудиторная работа", "2. Самостоятельная работа", "Форма промежуточной"
+            "Аудиторная работа", "2. Самостоятельная работа", "Форма промежуточной",
+            "Вид промежуточного контроля"
         ]):
             continue
         hour_vals = [c.text.strip().replace(' ', '') for c in row.cells[1:]]
@@ -79,6 +160,59 @@ def postprocess_table_2(doc):
 
     for r_idx in rows_to_delete:
         remove_element(t2.rows[r_idx]._tr)
+
+    # Проверка, является ли курс односеместровым
+    has_sem_2 = False
+    if context and context.get("sem_2_hdr"):
+        has_sem_2 = bool(str(context.get("sem_2_hdr")).strip())
+    else:
+        if len(t2.rows) > 1:
+            tcs_r1 = t2.rows[1]._tr.xpath('w:tc')
+            if len(tcs_r1) >= 4:
+                txt_sem2 = "".join(tcs_r1[3].itertext()).strip()
+                has_sem_2 = bool(txt_sem2)
+
+    if not has_sem_2:
+        # Односеместровый курс: удаляем 4-ю колонку и делаем чистую таблицу из 3 колонок
+        grid = t2._tbl.tblGrid
+        cols = grid.xpath('w:gridCol')
+        if len(cols) == 4:
+            grid.remove(cols[3])
+            cols[0].set(qn('w:w'), '6800')
+            cols[1].set(qn('w:w'), '2000')
+            cols[2].set(qn('w:w'), '2000')
+
+        # Row 0: ячейка 2 ("В т.ч. семестр") имела gridSpan=2, снимаем gridSpan
+        if len(t2.rows) > 0:
+            r0_tcs = t2.rows[0]._tr.xpath('w:tc')
+            if len(r0_tcs) >= 3:
+                gs0 = r0_tcs[2].xpath('.//w:gridSpan')
+                if gs0:
+                    gs0[0].getparent().remove(gs0[0])
+
+        # Строка "в том числе:": уменьшаем gridSpan с 4 до 3
+        for r in t2.rows:
+            r_tcs = r._tr.xpath('w:tc')
+            if len(r_tcs) == 1:
+                gs = r_tcs[0].xpath('.//w:gridSpan')
+                if gs:
+                    gs[0].set(qn('w:val'), '3')
+
+        # Во всех строках с 4 ячейками удаляем 4-ю ячейку
+        for r in t2.rows:
+            r_tcs = r._tr.xpath('w:tc')
+            if len(r_tcs) == 4:
+                r._tr.remove(r_tcs[3])
+    else:
+        # Для двухсеместрового курса: строка "Вид промежуточного контроля" должна иметь gridSpan=3
+        for r in t2.rows:
+            r_tcs = r._tr.xpath('w:tc')
+            if len(r_tcs) == 2:
+                txt_0 = "".join(r_tcs[0].itertext()).strip()
+                if "промежуточного контроля" in txt_0:
+                    gs = r_tcs[1].xpath('.//w:gridSpan')
+                    if gs:
+                        gs[0].set(qn('w:val'), '3')
 
 
 def postprocess_table_3(doc):
@@ -179,6 +313,9 @@ def generate_rpd(template_path: str, context: dict, out_path: str) -> str:
     """
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
 
+    # Санитизация полей Раздела 2
+    context = sanitize_section2_text(context)
+
     # 1. Рендеринг шаблона через docxtpl
     tpl = DocxTemplate(template_path)
     tpl.render(context)
@@ -187,7 +324,7 @@ def generate_rpd(template_path: str, context: dict, out_path: str) -> str:
     # 2. Пост-процессинг верстки в python-docx
     doc = docx.Document(out_path)
     postprocess_table_1(doc)
-    postprocess_table_2(doc)
+    postprocess_table_2(doc, context)
     postprocess_table_3(doc)
     postprocess_table_5(doc)
     postprocess_toc(doc)

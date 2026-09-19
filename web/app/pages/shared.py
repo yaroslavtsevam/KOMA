@@ -3,8 +3,10 @@ shared.py – Common page layout (header + sidebar) used by all inner pages.
 """
 
 from contextlib import contextmanager
+from pathlib import Path
 from nicegui import ui
 from ..auth import logout_user, current_user
+from ..db import processing_dir
 
 
 _GLOBAL_CSS = """
@@ -189,38 +191,23 @@ def _step_indicator(active: int, project: dict):
     variables_path = project.get("variables_path")
     rpd_path = project.get("rpd_path")
 
-    if has_plan:
-        # Unified 4-step pipeline: RPD -> Parameters -> OMD Questions -> Download
-        rpd_done = bool(rpd_path and Path(rpd_path).exists()) or status in ("rpd_ready", "variables", "questions", "done")
-        omd_avail = rpd_done and not is_running
-        vars_avail = bool(variables_path and Path(variables_path).exists() and not is_running)
-        done_avail = status == "done" or bool(project.get("result_path") and Path(project["result_path"]).exists())
+    rpd_done = bool(rpd_path and Path(rpd_path).exists()) or status in ("rpd_ready", "variables", "questions", "done")
+    rpd_ctx_file = processing_dir(project["name"]) / "rpd_context.json"
+    rpd_ctx_exists = rpd_ctx_file.exists() or rpd_done
+    omd_avail = rpd_done and not is_running
+    vars_avail = bool(variables_path and Path(variables_path).exists() and not is_running)
+    done_avail = status == "done" or bool(project.get("result_path") and Path(project["result_path"]).exists())
 
-        steps = [
-            (1, "1. Мастер РПД", "edit_document", f"/project/{project_id}/rpd", not is_running),
-            (2, "2. Параметры ОМД", "settings", f"/project/{project_id}/parameters", omd_avail),
-            (3, "3. Вопросы и задания", "rate_review", f"/project/{project_id}/variables", vars_avail),
-            (4, "4. Готовые документы", "download", f"/project/{project_id}/download", done_avail),
-        ]
-    else:
-        # Legacy syllabus-only pipeline
-        step1_avail = not is_running
-        step2_avail = status != "new" and not is_running
-        step3_avail = bool(variables_path and Path(variables_path).exists() and not is_running)
-        step4_avail = status in ("generating_questions", "questions", "generating_docx", "done")
-        step5_avail = bool(variables_path and Path(variables_path).exists() and status in ("questions", "generating_docx", "done") and not is_running)
-        step6_avail = status in ("generating_docx", "done")
-        step7_avail = bool(project.get("result_path") and Path(project["result_path"]).exists() and status == "done")
-
-        steps = [
-            (1, "Параметры", "settings", f"/project/{project_id}/parameters", step1_avail),
-            (2, "Структура AI", "auto_awesome", f"/project/{project_id}/processing", step2_avail),
-            (3, "Проверка структуры", "edit_note", f"/project/{project_id}/variables", step3_avail),
-            (4, "Вопросы AI", "psychology", f"/project/{project_id}/processing", step4_avail),
-            (5, "Проверка вопросов", "rate_review", f"/project/{project_id}/variables", step5_avail),
-            (6, "Генерация Word", "build", f"/project/{project_id}/processing", step6_avail),
-            (7, "Готово", "download", f"/project/{project_id}/download", step7_avail),
-        ]
+    steps = [
+        (1, "1. Курс", "school", f"/project/{project_id}/parameters", not is_running),
+        (2, "2. Данные РПД", "edit_document", f"/project/{project_id}/rpd", not is_running),
+        (3, "3. Синтез РПД", "auto_awesome", f"/project/{project_id}/processing", status == "generating_rpd_content"),
+        (4, "4. РПД финал", "verified", f"/project/{project_id}/rpd_final", rpd_ctx_exists and not is_running),
+        (5, "5. Данные ОМД", "tune", f"/project/{project_id}/omd_parameters", (rpd_done or rpd_ctx_exists) and not is_running),
+        (6, "6. Синтез ОМД", "psychology", f"/project/{project_id}/processing", status in ("generating_questions", "generating_docx")),
+        (7, "7. Итог ОМД", "rate_review", f"/project/{project_id}/variables", vars_avail),
+        (8, "8. Комплект", "download", f"/project/{project_id}/download", done_avail or rpd_done),
+    ]
 
     with ui.row().classes("w-full gap-0 mb-8 items-center"):
         for i, (num, label, icon, route, avail) in enumerate(steps):
@@ -243,30 +230,30 @@ def _step_indicator(active: int, project: dict):
             else:
                 text_color = "#4b5563"
 
-            with ui.column().classes("items-center gap-1").style("flex: 1; position: relative;"):
+            with ui.column().classes("items-center gap-1").style("flex: 1; position: relative; min-width: 60px;"):
                 circle_classes = "items-center justify-center transition-all"
                 if avail and not is_active:
                     circle_classes += " cursor-pointer hover:scale-110"
 
-                circle_style = f"width: 36px; height: 36px; border-radius: 50%; background: {color}; margin: 0 auto; display: flex;"
+                circle_style = f"width: 32px; height: 32px; border-radius: 50%; background: {color}; margin: 0 auto; display: flex;"
 
                 circle = ui.row().classes(circle_classes).style(circle_style)
                 with circle:
                     if is_done:
-                        ui.icon("check", size="1rem").style("color: white;")
+                        ui.icon("check", size="0.9rem").style("color: white;")
                     else:
-                        ui.icon(icon, size="1rem").style(f"color: {'white' if is_active else '#6b7280'};")
+                        ui.icon(icon, size="0.9rem").style(f"color: {'white' if is_active else '#9ca3af'};")
 
                 if avail and not is_active:
                     circle.on("click", lambda _, r=route: ui.navigate.to(r))
 
-                ui.label(label).classes("text-xs font-medium").style(f"color: {text_color};")
+                ui.label(label).classes("text-[11px] font-medium text-center truncate w-full").style(f"color: {text_color};")
 
             if i < len(steps) - 1:
                 line_color = "#10b981" if num < active else "rgba(255,255,255,0.1)"
                 ui.separator().style(
-                    f"flex: 2; height: 2px; background: {line_color}; "
-                    f"margin-top: -20px; border: none; align-self: flex-start;"
+                    f"flex: 1.5; height: 2px; background: {line_color}; "
+                    f"margin-top: -18px; border: none; align-self: flex-start;"
                 )
 
 

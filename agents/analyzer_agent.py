@@ -1,10 +1,13 @@
+import os
 from google.adk.agents import LlmAgent
 from schemas.omd_schema import OmdDataSchema
+
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
 
 # AnalyzerAgent parses rpd_content and saves structural JSON to omd_json_data
 analyzer_agent = LlmAgent(
     name="AnalyzerAgent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     output_schema=OmdDataSchema,
     instruction="""
     You are the AnalyzerAgent. Your job is to read the raw syllabus Markdown content provided in the user input message

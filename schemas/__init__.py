@@ -1,3 +1,3 @@
-from .omd_schema import OmdDataSchema
+from .omd_schema import OmdDataSchema, ActivityQuestionsItem, OmdQuestionsPatchSchema
 
-__all__ = ["OmdDataSchema"]
+__all__ = ["OmdDataSchema", "ActivityQuestionsItem", "OmdQuestionsPatchSchema"]

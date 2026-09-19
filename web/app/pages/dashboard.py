@@ -10,11 +10,14 @@ from pathlib import Path
 from nicegui import ui, events
 from ..db import (
     get_user_projects, create_project, update_project_files, update_project_status,
-    input_dir, processing_dir, results_dir,
+    delete_project, input_dir, processing_dir, results_dir,
 )
 from ..auth import current_user, require_login
 from .shared import page_layout, STATUS_LABELS
 from rpd_app.core.curriculum_parser import CurriculumParser
+from rpd_app.data.timiryazev_structure import (
+    get_institutes, get_departments_by_institute, get_all_departments, find_institute_for_department
+)
 
 logger = logging.getLogger("dashboard")
 
@@ -23,7 +26,8 @@ STATUS_STEP = {
     "plan_uploaded":        "/rpd",
     "rpd_wizard":           "/rpd",
     "generating_rpd":       "/rpd",
-    "rpd_ready":            "/rpd",
+    "generating_rpd_content": "/processing",
+    "rpd_ready":            "/rpd_final",
     "processing_structure": "/processing",
     "variables":            "/variables",
     "generating_questions": "/processing",
@@ -91,7 +95,40 @@ async def dashboard_page():
                     label="Выберите дисциплину из учебного плана",
                     options={},
                     with_input=True
-                ).props("outlined dark color=indigo").classes("w-full mb-4")
+                ).props("outlined dark color=indigo").classes("w-full mb-3")
+
+                all_institutes = get_institutes()
+                all_depts = get_all_departments()
+
+                with ui.row().classes("w-full gap-3 mb-4"):
+                    inst_select = ui.select(
+                        label="Институт (РГАУ-МСХА)",
+                        options=all_institutes,
+                        value=all_institutes[1] if len(all_institutes) > 1 else all_institutes[0]
+                    ).props("outlined dark color=indigo").classes("flex-1")
+
+                    dept_select = ui.select(
+                        label="Кафедра создания РПД и ОМД",
+                        options=all_depts,
+                        value="Кафедра экологии",
+                        with_input=True
+                    ).props("outlined dark color=indigo").classes("flex-1")
+
+                def on_inst_change(e):
+                    if e.value:
+                        depts = get_departments_by_institute(e.value)
+                        if depts:
+                            if dept_select.value not in depts:
+                                dept_select.value = depts[0]
+                            dept_select.options = depts
+                inst_select.on_value_change(on_inst_change)
+
+                def on_dept_change(e):
+                    if e.value:
+                        matched_inst = find_institute_for_department(e.value)
+                        if matched_inst and inst_select.value != matched_inst:
+                            inst_select.value = matched_inst
+                dept_select.on_value_change(on_dept_change)
 
                 def on_discipline_selected(code):
                     if not code:
@@ -101,6 +138,18 @@ async def dashboard_page():
                     for d in upload_state["all_disciplines"]:
                         if d["code"] == code:
                             name = d["name"]
+                            dept_name = d.get("department", "")
+                            if dept_name:
+                                matched_inst = find_institute_for_department(dept_name)
+                                if matched_inst:
+                                    inst_select.value = matched_inst
+                                    depts = get_departments_by_institute(matched_inst)
+                                    if dept_name not in depts:
+                                        depts.append(dept_name)
+                                    dept_select.options = depts
+                                    dept_select.value = dept_name
+                                elif dept_name in all_depts:
+                                    dept_select.value = dept_name
                             break
                     upload_state["selected_name"] = name
                     # Suggest clean project name
@@ -249,7 +298,9 @@ async def dashboard_page():
                                 name=safe_name,
                                 course_code=upload_state["selected_code"],
                                 course_name=upload_state["selected_name"],
-                                plan_filename=upload_state["plan_filename"]
+                                plan_filename=upload_state["plan_filename"],
+                                department=dept_select.value or "Кафедра экологии",
+                                institute=inst_select.value or ""
                             )
                             update_project_files(pid, plan_path=str(dest_plan))
                             update_project_status(pid, "rpd_wizard")
@@ -268,7 +319,9 @@ async def dashboard_page():
                             pid = create_project(
                                 user_id=user["user_id"],
                                 name=safe_name,
-                                plan_filename=upload_state["legacy_filename"]
+                                plan_filename=upload_state["legacy_filename"],
+                                department=dept_select.value or "",
+                                institute=inst_select.value or ""
                             )
                             update_project_files(pid, syllabus_path=str(dest_pdf))
 
@@ -280,6 +333,29 @@ async def dashboard_page():
                     ).classes("primary-btn")
 
             ui.button("+ Новый проект", on_click=new_dlg.open).classes("primary-btn")
+
+        def open_delete_dialog(proj: dict):
+            with ui.dialog() as dlg, ui.card().classes("app-card p-6 min-w-[380px] max-w-md"):
+                ui.label("Удаление проекта").classes("text-lg font-bold text-white mb-2")
+                disp_title = proj.get("course_name") or proj["name"]
+                ui.label(
+                    f"Вы действительно хотите удалить проект «{disp_title}»?\n\n"
+                    "Все связанные файлы (учебный план, контекст, сгенерированные РПД и ОМД) будут безвозвратно удалены из файловой системы и базы данных."
+                ).classes("text-sm text-gray-300 mb-6 whitespace-pre-line")
+                with ui.row().classes("w-full justify-end gap-3"):
+                    ui.button("Отмена", on_click=dlg.close).props("flat")
+                    def confirm_delete():
+                        safe_name = proj["name"]
+                        delete_project(proj["id"])
+                        # Clean filesystem
+                        shutil.rmtree(input_dir(safe_name), ignore_errors=True)
+                        shutil.rmtree(processing_dir(safe_name), ignore_errors=True)
+                        shutil.rmtree(results_dir(safe_name), ignore_errors=True)
+                        dlg.close()
+                        ui.notify(f"Проект «{safe_name}» успешно удален", type="positive")
+                        ui.navigate.to("/")
+                    ui.button("Удалить", on_click=confirm_delete).props("color=negative")
+            dlg.open()
 
         # ── Projects list ─────────────────────────────────────────────────────
         if not projects:
@@ -330,6 +406,11 @@ async def dashboard_page():
                                 ui.icon("error_outline", size="1.2rem").style(
                                     "color: #ef4444;"
                                 ).tooltip(p.get("error_message", ""))
+
+                            # Delete button with click.stop so it doesn't trigger card navigation
+                            del_btn = ui.button(icon="delete").props("flat round dense color=negative").tooltip("Удалить проект")
+                            del_btn.on("click.stop", lambda _, proj=p: open_delete_dialog(proj))
+
                             ui.icon("chevron_right", size="1.2rem").style(
                                 "color: #6366f1;"
                             )

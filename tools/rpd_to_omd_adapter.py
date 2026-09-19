@@ -12,14 +12,39 @@ import yaml
 import copy
 
 
-def rpd_context_to_omd_variables(rpd_context: dict, existing_variables: dict = None) -> dict:
+def _safe_float(val, default: float = 0.0) -> float:
+    if val is None or val == "":
+        return default
+    try:
+        return float(str(val).replace(",", ".").strip())
+    except (ValueError, TypeError):
+        return default
+
+
+def rpd_context_to_omd_variables(rpd_context: dict, existing_variables: dict = None, params: dict = None) -> dict:
     """
     Преобразует словарь контекста РПД (из rpd_app) в формат variables.yml для ОМД.
     Если передан existing_variables, сохраняет уже сгенерированные AI вопросы и задания.
+    Если передан params, заполняет реквизиты заседания кафедры.
     """
+    params = params or {}
+
     # 1. Метаданные шапки
-    institute = rpd_context.get("institute", "Институт мелиорации, водного хозяйства и строительства имени А.Н. Костякова")
-    department = rpd_context.get("department", "Кафедра экологии")
+    raw_inst = rpd_context.get("institute")
+    try:
+        from rpd_app.data.timiryazev_structure import normalize_institute
+        institute = normalize_institute(raw_inst) or "Институт мелиорации, водного хозяйства и строительства имени А.Н. Костякова"
+    except Exception:
+        institute = raw_inst or "Институт мелиорации, водного хозяйства и строительства имени А.Н. Костякова"
+
+    dept_raw = str(rpd_context.get("department") or params.get("department") or "").strip()
+    if not dept_raw or dept_raw.lower() in ("кафедра", "кафедра:"):
+        department = "Кафедра экологии"
+    else:
+        department = dept_raw if dept_raw.startswith("Кафедра") else f"Кафедра {dept_raw}"
+
+    department_head_fio = rpd_context.get("department_head_fio") or (existing_variables and existing_variables.get("department_head_fio")) or "М.В. Тихонова"
+
     course_code = rpd_context.get("course_code", "")
     course_title = rpd_context.get("course_name", "")
     degree_type = rpd_context.get("qualification_plural", "магистров")
@@ -34,6 +59,12 @@ def rpd_context_to_omd_variables(rpd_context: dict, existing_variables: dict = N
     developers = rpd_context.get("developer_fio_rank", "")
     reviewer = rpd_context.get("reviewer_fio_rank", "")
 
+    # Реквизиты протокола заседания кафедры
+    proto_num = str(params.get("protocol_num") or rpd_context.get("protocol_num") or (existing_variables and existing_variables.get("protocol_num")) or "1")
+    proto_month = str(params.get("protocol_month") or rpd_context.get("protocol_month") or (existing_variables and existing_variables.get("protocol_month")) or "августа")
+    proto_day = str(params.get("protocol_day") or rpd_context.get("protocol_day") or (existing_variables and existing_variables.get("protocol_day")) or "30")
+    cathedra_year = str(params.get("cathedra_meeting_year") or rpd_context.get("cathedra_meeting_year") or start_year or (existing_variables and existing_variables.get("cathedra_meeting_year")) or "2026")
+
     # 2. Таблица 1 ОМД (Этапы формирования компетенций)
     table1 = []
     # 3. Таблица 2 ОМД (Индикаторы и дескрипторы Знать/Уметь/Владеть)
@@ -41,6 +72,7 @@ def rpd_context_to_omd_variables(rpd_context: dict, existing_variables: dict = N
 
     comp_nested = rpd_context.get("competencies_nested", [])
     row_idx = 1
+    comp_row_idx = 1
     for comp in comp_nested:
         comp_code = comp.get("code", "")
         comp_title = comp.get("title", "")
@@ -51,18 +83,10 @@ def rpd_context_to_omd_variables(rpd_context: dict, existing_variables: dict = N
             all_inds.append(comp["ind_first"])
         all_inds.extend(comp.get("other_indicators", []))
 
-        ind_texts = []
-        know_list = []
-        able_list = []
-        master_list = []
-
-        for ind in all_inds:
+        for ind_sub_idx, ind in enumerate(all_inds):
             ind_code = ind.get("code", "")
             ind_t = ind.get("title", "")
-            ind_texts.append(f"{ind_code} {ind_t}".strip())
-            if ind.get("know"): know_list.append(ind["know"])
-            if ind.get("able"): able_list.append(ind["able"])
-            if ind.get("master"): master_list.append(ind["master"])
+            ind_full = f"{ind_code} {ind_t}".strip() if (ind_code or ind_t) else comp_code
 
             # Добавляем этапы в Таблицу 1
             table1.append({
@@ -73,15 +97,18 @@ def rpd_context_to_omd_variables(rpd_context: dict, existing_variables: dict = N
             })
             row_idx += 1
 
-        table2.append({
-            "num": f"{len(table2) + 1}.",
-            "comp_code": comp_code,
-            "content": comp_title,
-            "indicators": "; ".join(ind_texts),
-            "know": "; ".join(know_list),
-            "umeti": "; ".join(able_list),
-            "vladeti": "; ".join(master_list)
-        })
+            # Добавляем строку для каждого индикатора в Таблицу 2
+            row_num_str = f"{comp_row_idx}.{ind_sub_idx + 1}" if len(all_inds) > 1 else f"{comp_row_idx}."
+            table2.append({
+                "num": row_num_str,
+                "comp_code": comp_code,
+                "content": comp_title,
+                "indicators": ind_full,
+                "know": ind.get("know", "").strip(),
+                "umeti": ind.get("able", "").strip(),
+                "vladeti": ind.get("master", "").strip()
+            })
+        comp_row_idx += 1
 
     # 4. Сетка занятий (activities) из Таблицы 4 РПД
     # Считываем уже существующие сгенерированные вопросы (если они есть)
@@ -96,6 +123,7 @@ def rpd_context_to_omd_variables(rpd_context: dict, existing_variables: dict = N
                 existing_act_map[f"idx_{idx}"] = e_act["questions"]
 
     activities = []
+    oral_qs_pool = [q.get("text") for q in rpd_context.get("oral_questions_list", []) if q.get("text")]
     t4_sections = rpd_context.get("t4_sections", [])
     for sec in t4_sections:
         for lesson in sec.get("lessons", []):
@@ -108,11 +136,18 @@ def rpd_context_to_omd_variables(rpd_context: dict, existing_variables: dict = N
                 existing_act_map.get(f"idx_{len(activities)}") or
                 []
             )
+            # Если вопросов еще нет, подставляем релевантные вопросы из пула устного опроса РПД
+            if not preserved_q and oral_qs_pool:
+                pool_idx = len(activities) % len(oral_qs_pool)
+                q1 = oral_qs_pool[pool_idx]
+                q2 = oral_qs_pool[(pool_idx + 1) % len(oral_qs_pool)] if len(oral_qs_pool) > 1 else None
+                preserved_q = [q1] if not q2 or q1 == q2 else [q1, q2]
+
             activities.append({
                 "num": l_num,
                 "theme": l_theme,
                 "type": "Лекция" if "Лекция" in l_num else "Практическое занятие",
-                "hours": float(lesson.get("hours", 1.5)),
+                "hours": _safe_float(lesson.get("hours", 1.5), 1.5),
                 "comp_code": lesson.get("competencies", ""),
                 "eval_tool": lesson.get("control", "Устный опрос"),
                 "questions": preserved_q
@@ -128,7 +163,7 @@ def rpd_context_to_omd_variables(rpd_context: dict, existing_variables: dict = N
                 "num": lec_num,
                 "theme": s_name,
                 "type": "Лекция",
-                "hours": float(s.get("lec", 2) or 2),
+                "hours": _safe_float(s.get("lec", 2), 2.0),
                 "comp_code": comp_nested[0]["code"] if comp_nested else "УК-1",
                 "eval_tool": "Устный опрос",
                 "questions": lec_q
@@ -139,7 +174,7 @@ def rpd_context_to_omd_variables(rpd_context: dict, existing_variables: dict = N
                 "num": prac_num,
                 "theme": s_name,
                 "type": "Практическое занятие",
-                "hours": float(s.get("prac", 2) or 2),
+                "hours": _safe_float(s.get("prac", 2), 2.0),
                 "comp_code": comp_nested[0]["code"] if comp_nested else "УК-1",
                 "eval_tool": "Защита практической работы",
                 "questions": prac_q
@@ -183,7 +218,15 @@ def rpd_context_to_omd_variables(rpd_context: dict, existing_variables: dict = N
     else:
         test_qs = []
         for tq in rpd_context.get("test_questions_list", []):
-            test_qs.append(f"{tq.get('question')} (Варианты: {tq.get('a')}; {tq.get('b')}; {tq.get('c')}; {tq.get('d')})")
+            q_text = tq.get("question", "")
+            a = tq.get("a", "")
+            b = tq.get("b", "")
+            c = tq.get("c", "")
+            d = tq.get("d", "")
+            if a or b or c or d:
+                test_qs.append(f"{q_text}\n   а) {a}\n   б) {b}\n   в) {c}\n   г) {d}")
+            else:
+                test_qs.append(q_text)
         test_paper = {
             "criteria": "Оценка 5: 85-100% правильных ответов; Оценка 4: 70-84%; Оценка 3: 50-69%; Оценка 2: менее 50%.",
             "topics": [
@@ -211,25 +254,41 @@ def rpd_context_to_omd_variables(rpd_context: dict, existing_variables: dict = N
             "criteria": "Оценка 5: проект выполнен полностью и защищен; Оценка 4: незначительные замечания; Оценка 3: проект требует доработки; Оценка 2: проект не сдан."
         }
 
-    # Вопросы к зачету / экзамену
+    # Вопросы к зачету / экзамену (сквозная синхронизация формы контроля РПД -> ОМД)
     credit = None
     exam = None
-    control_form_name = rpd_context.get("control_form", "зачет с оценкой")
-    if existing_variables and existing_variables.get("credit"):
-        credit = existing_variables["credit"]
-    if existing_variables and existing_variables.get("exam"):
-        exam = existing_variables["exam"]
+    control_form_name = str(rpd_context.get("control_form", "зачет")).lower()
+    is_exam = "экзамен" in control_form_name
+    is_graded_credit = "оценк" in control_form_name
 
-    if not credit and not exam:
-        exam_qs = [eq.get("text") for eq in rpd_context.get("exam_credit_questions_list", []) if eq.get("text")]
-        credit_or_exam = {
-            "questions": exam_qs if exam_qs else ["Вопрос 1 к промежуточной аттестации.", "Вопрос 2 к промежуточной аттестации."],
+    exam_qs = [eq.get("text") for eq in rpd_context.get("exam_credit_questions_list", []) if eq.get("text")]
+    if not exam_qs:
+        exam_qs = ["Вопрос 1 к промежуточной аттестации.", "Вопрос 2 к промежуточной аттестации."]
+
+    if is_exam:
+        course_type_val = "экзамен"
+        prev_qs = existing_variables.get("exam", {}).get("questions") if (existing_variables and isinstance(existing_variables.get("exam"), dict)) else None
+        exam = {
+            "questions": prev_qs or exam_qs,
+            "criteria": "Отлично (85-100 б.): исчерпывающий ответ, глубокое владение материалом; Хорошо (70-84 б.): твердый ответ, незначительные неточности; Удовлетворительно (50-69 б.): пороговый уровень знаний; Неудовлетворительно (0-49 б.): компетенции не сформированы."
+        }
+        credit = None
+    elif is_graded_credit:
+        course_type_val = "зачет с оценкой"
+        prev_qs = existing_variables.get("credit", {}).get("questions") if (existing_variables and isinstance(existing_variables.get("credit"), dict)) else None
+        credit = {
+            "questions": prev_qs or exam_qs,
             "criteria": "Отлично (85-100 б.): исчерпывающий ответ; Хорошо (70-84 б.): твердый ответ; Удовлетворительно (50-69 б.): пороговый уровень; Не зачтено (0-49 б.): не освоено."
         }
-        if "экзамен" in control_form_name:
-            exam = credit_or_exam
-        else:
-            credit = credit_or_exam
+        exam = None
+    else:  # Строго обычный "зачет"
+        course_type_val = "зачет"
+        prev_qs = existing_variables.get("credit", {}).get("questions") if (existing_variables and isinstance(existing_variables.get("credit"), dict)) else None
+        credit = {
+            "questions": prev_qs or exam_qs,
+            "criteria": "Зачтено (50-100 б.): студент демонстрирует понимание основных концепций курса, решает типовые задачи; Не зачтено (0-49 б.): студент не владеет базовым материалом дисциплины, компетенции не сформированы."
+        }
+        exam = None
 
     omd_data = {
         "institute": institute,
@@ -264,15 +323,16 @@ def rpd_context_to_omd_variables(rpd_context: dict, existing_variables: dict = N
         "roleplay": None,
         "multi_level_tasks": None,
         "course_work": None,
-        # Дополнительные метки
-        "cathedra_name": department,
-        "cathedra_meeting_year": start_year,
-        "protocol_num": "__",
-        "protocol_month": "___________",
-        "protocol_year": start_year,
+        # Дополнительные метки и реквизиты
+        "department_head_fio": department_head_fio,
+        "cathedra_meeting_year": cathedra_year,
+        "protocol_num": proto_num,
+        "protocol_month": proto_month,
+        "protocol_day": proto_day,
+        "protocol_year": cathedra_year,
         "degree_qualification": rpd_context.get("qualification", "магистр"),
         "degree_qualification_genitive": "магистра" if "магистр" in rpd_context.get("qualification", "") else "бакалавра",
-        "course_type": "профессиональная подготовка",
+        "course_type": course_type_val,
         "hours": rpd_context.get("total_hours", "108")
     }
 

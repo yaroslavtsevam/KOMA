@@ -564,24 +564,32 @@ def get_preset_for_environmental_digital_tech():
     # Критерии оценки (Таблица 8)
     criteria = [
         {
+            "level": "«Отлично» (высокий уровень) / «Зачтено»",
+            "desc": "Оценку «отлично» (высокий уровень) заслуживает студент, освоивший знания, умения, компетенции и теоретический материал без пробелов; выполнивший все задания, предусмотренные учебным планом на высоком качественном уровне; практические навыки профессионального применения освоенных знаний сформированы.",
             "grade": "Отлично",
             "points": "85–100",
             "description": "Глубокое и всестороннее знание теоретических основ цифровых природоохранных технологий; свободное владение инструментарием ГИС, методами дешифрирования данных ДЗЗ и БАС; безупречное выполнение и защита всех практических работ и индивидуального проекта.",
             "competency_level": "Высокий (продвинутый)"
         },
         {
+            "level": "«Хорошо» (средний уровень) / «Зачтено»",
+            "desc": "Оценку «хорошо» (средний уровень) заслуживает студент, практически полностью освоивший знания, умения, компетенции и теоретический материал; учебные задания выполнены грамотно, практические навыки в основном сформированы, допущены непринципиальные неточности.",
             "grade": "Хорошо",
             "points": "70–84",
             "description": "Твердое знание программного материала, грамотное изложение ответов; успешное применение ГИС-пакетов при решении практических задач мониторинга; наличие незначительных погрешностей в расчетах или формулировках выводов при защите работ.",
             "competency_level": "Базовый (достаточный)"
         },
         {
+            "level": "«Удовлетворительно» (пороговый уровень) / «Зачтено»",
+            "desc": "Оценку «удовлетворительно» (пороговый уровень) заслуживает студент, частично с пробелами освоивший знания, умения, компетенции и теоретический материал; многие учебные задания выполнены с ошибками или оценены минимальным числом баллов, базовые практические навыки сформированы.",
             "grade": "Удовлетворительно",
             "points": "50–69",
             "description": "Знание основного минимума содержания курса; затруднения при самостоятельном выполнении операций пространственного анализа в ГИС или расчете спектральных индексов; выполнение обязательных практических работ с непринципиальными ошибками.",
             "competency_level": "Пороговый (минимальный)"
         },
         {
+            "level": "«Неудовлетворительно» / «Не зачтено»",
+            "desc": "Оценку «неудовлетворительно» (компетенции не сформированы) заслуживает студент, не освоивший базовые знания, умения и теоретический материал курса; обязательные задания учебного плана не выполнены, практические навыки не сформированы.",
             "grade": "Не зачтено",
             "points": "0–49",
             "description": "Пробелы в базовых знаниях цифровых стандартов и технологий экоконтроля; невыполнение обязательных практических заданий; отсутствие сформированных компетенций УК-2, УК-3, ПКос-1, ПКос-2.",
@@ -622,25 +630,68 @@ def get_preset_for_environmental_digital_tech():
 
     # ПО и МТО
     software_items = [
-        {"num": "1", "name": "Операционная система Astra Linux / Windows 10/11 Professional", "license": "Лицензия образовательного учреждения"},
-        {"num": "2", "name": "Геоинформационная система QGIS / NextGIS QGIS", "license": "Свободное ПО (GNU GPL v2+)"},
-        {"num": "3", "name": "СУБД PostgreSQL с пространственным модулем PostGIS", "license": "Свободное ПО (PostgreSQL License)"},
-        {"num": "4", "name": "Офисный пакет МойОфис Стандартный / LibreOffice", "license": "Корпоративная академическая лицензия / LGPL"},
-        {"num": "5", "name": "Среда программирования и анализа данных Python (JupyterLab, GeoPandas, Rasterio)", "license": "Свободное ПО (PSFL)"}
+        {
+            "num": "1",
+            "section": "Все разделы",
+            "name": "Операционная система Astra Linux / Windows 10/11 Professional",
+            "type": "Операционная система",
+            "author": "ГК «Астра» / Microsoft Corp.",
+            "year": "2024",
+            "license": "Лицензия образовательного учреждения"
+        },
+        {
+            "num": "2",
+            "section": "Раздел 2, Раздел 3",
+            "name": "Геоинформационная система QGIS / NextGIS QGIS",
+            "type": "Геоинформационная система",
+            "author": "QGIS Development Team",
+            "year": "2024",
+            "license": "Свободное ПО (GNU GPL v2+)"
+        },
+        {
+            "num": "3",
+            "section": "Раздел 3",
+            "name": "СУБД PostgreSQL с пространственным модулем PostGIS",
+            "type": "Система управления базами данных",
+            "author": "PostgreSQL Global Development Group",
+            "year": "2024",
+            "license": "Свободное ПО (PostgreSQL License)"
+        },
+        {
+            "num": "4",
+            "section": "Все разделы",
+            "name": "Офисный пакет МойОфис Стандартный / LibreOffice",
+            "type": "Офисный пакет",
+            "author": "ООО «Новые Облачные Технологии»",
+            "year": "2024",
+            "license": "Корпоративная академическая лицензия / LGPL"
+        },
+        {
+            "num": "5",
+            "section": "Раздел 2, Раздел 4",
+            "name": "Среда программирования и анализа данных Python (JupyterLab, GeoPandas, Rasterio)",
+            "type": "Среда разработки и анализа данных",
+            "author": "Python Software Foundation",
+            "year": "2024",
+            "license": "Свободное ПО (PSFL)"
+        }
     ]
     facilities = [
         {
             "num": "1",
+            "room": "Учебная аудитория для проведения занятий лекционного типа (корпус 17, ауд. 312)",
             "name": "Аудитория для проведения лекционных занятий",
             "equipment": "Мультимедийный проектор, экран, персональный компьютер преподавателя с выходом в Интернет и подключением к ЭИОС университета, специализированная мебель, учебная доска."
         },
         {
             "num": "2",
+            "room": "Компьютерный класс для проведения практических занятий и геомоделирования (корпус 17, ауд. 215)",
             "name": "Компьютерный класс для проведения практических занятий и геомоделирования",
             "equipment": "Рабочие станции обучающихся, объединенные в локальную сеть с выходом в Интернет, с предустановленным программным обеспечением ГИС (QGIS), средой Python и доступом к электронным библиотечным системам."
         },
         {
             "num": "3",
+            "room": "Помещение для самостоятельной работы обучающихся (корпус 17, ауд. 201)",
             "name": "Помещение для самостоятельной работы обучающихся",
             "equipment": "Компьютерная техника с возможностью подключения к сети «Интернет» и обеспечением доступа в электронную информационно-образовательную среду университета."
         }
@@ -822,283 +873,47 @@ def get_preset_for_environmental_digital_tech():
 
 def build_generic_context_from_parsed(meta: dict, disc: dict, comps: list, coreqs: list) -> dict:
     """
-    Генерирует базовый корректный контекст для любой выбранной дисциплины
-    на основе спарсенных данных и стандартных заготовок.
+    Генерирует контекст для любой выбранной дисциплины:
+    При наличии GOOGLE_API_KEY вызывает rpd_ai_generator.generate_rpd_content_via_ai
+    для прегенерации глубоких З-У-В дескрипторов, динамических разделов и ФОС через Gemini.
+    При отсутствии ключа или ошибке сети возвращает надежный структурный каркас с динамическим числом разделов.
     """
-    sem = disc.get("semesters", [1])[0] if disc.get("semesters") else 1
-    course_year = str((sem + 1) // 2)
-    zet = str(disc.get("ze", 2))
-    hours_total = str(disc.get("hours_total", 72))
-    hours_contact = str(disc.get("hours_contact", 28.35)).replace('.', ',')
-    hours_lec = str(disc.get("hours_lecture", 14))
-    hours_prac = str(disc.get("hours_practical", 14))
-    hours_lab = str(disc.get("hours_lab", "")) if disc.get("hours_lab") else ""
-    hours_srs = str(disc.get("hours_srs", 43.65)).replace('.', ',')
-    hours_control = str(disc.get("hours_control", 0.35)).replace('.', ',')
-    control_form = disc.get("control_form", "Зачет с оценкой")
-    control_form_lower = control_form.lower()
-    control_gen = "зачета с оценкой" if "оценк" in control_form_lower else ("экзамена" if "экзамен" in control_form_lower else "зачета")
+    try:
+        from tools.rpd_ai_generator import generate_rpd_content_via_ai
+        return generate_rpd_content_via_ai(meta, disc, comps, coreqs)
+    except Exception as exc:
+        import logging
+        logging.getLogger("course_presets").warning("Failed to invoke AI generator: %s. Using basic fallback.", exc)
+        from tools.rpd_ai_generator import (
+            calculate_optimal_sections_count,
+            _generate_fallback_rpd_content,
+            _build_full_template_context
+        )
+        hours_tot = float(disc.get("hours_total", 72) or 72)
+        hours_l = float(disc.get("hours_lecture", 14) or 14)
+        hours_p = float(disc.get("hours_practical", 14) or 14)
+        hours_lab = float(disc.get("hours_lab", 0) or 0)
+        hours_s = float(disc.get("hours_srs", 43.65) or 43.65)
+        hours_k = float(disc.get("hours_control", 0.35) or 0.35)
+        sem = disc.get("semesters", [1])[0] if disc.get("semesters") else 1
+        num_sec = calculate_optimal_sections_count(hours_tot, hours_l)
+        fb_data = _generate_fallback_rpd_content(disc, comps, num_sec, hours_l, hours_p, hours_s)
+        return _build_full_template_context(
+            meta=meta,
+            disc=disc,
+            comps=comps,
+            coreqs=coreqs or [],
+            ai_data=fb_data,
+            hours_total=hours_tot,
+            hours_lec=hours_l,
+            hours_prac=hours_p,
+            hours_lab=hours_lab,
+            hours_srs=hours_s,
+            hours_control=hours_k,
+            control_form=disc.get("control_form", "зачет с оценкой").lower(),
+            control_gen="зачета с оценкой",
+            sem=sem,
+            course_year=str((sem + 1) // 2),
+            zet=str(disc.get("ze", 2))
+        )
 
-    nested_comps = []
-    for i, c in enumerate(comps):
-        ind_first = None
-        other_inds = []
-        inds = c.get("indicators", [])
-        if inds:
-            ind_first = {
-                "code": inds[0]["code"],
-                "title": f"Знает, умеет и владеет методами в рамках компетенции {inds[0]['code']}",
-                "know": inds[0].get("know", "Теоретические основы дисциплины."),
-                "able": inds[0].get("can", "Применять методы на практике."),
-                "master": inds[0].get("master", "Практическими навыками и методиками.")
-            }
-            for ind in inds[1:]:
-                other_inds.append({
-                    "code": ind["code"],
-                    "title": f"Знает, умеет и владеет методами в рамках компетенции {ind['code']}",
-                    "know": ind.get("know", "Теоретические основы дисциплины."),
-                    "able": ind.get("can", "Применять методы на практике."),
-                    "master": ind.get("master", "Практическими навыками и методиками.")
-                })
-        else:
-            ind_first = {
-                "code": f"{c['code']}.1",
-                "title": f"Формирует компетенцию {c['code']}",
-                "know": "Теоретические основы дисциплины.",
-                "able": "Применять теоретические знания при решении задач.",
-                "master": "Навыками решения типовых профессиональных задач."
-            }
-
-        nested_comps.append({
-            "num": str(i + 1),
-            "code": c["code"],
-            "title": c.get("title", f"Компетенция {c['code']}"),
-            "ind_first": ind_first,
-            "other_indicators": other_inds
-        })
-
-    # Базовые 4 раздела
-    h_lec_int = int(disc.get("hours_lecture", 12) or 12)
-    h_prac_int = int(disc.get("hours_practical", 12) or 12)
-    h_srs_val = float(disc.get("hours_srs", 40) or 40)
-    lec_part = h_lec_int // 4
-    prac_part = h_prac_int // 4
-    srs_part = round(h_srs_val / 4, 2)
-
-    sections = [
-        {"name": f"Раздел 1. Введение и теоретические основы курса «{disc.get('name')}»", "total": str(round(lec_part + prac_part + srs_part, 2)).replace('.', ','), "lec": str(lec_part), "prac": str(prac_part), "lab": "", "pkr": "", "srs": str(srs_part).replace('.', ',')},
-        {"name": f"Раздел 2. Методологические принципы и стандарты в области «{disc.get('name')}»", "total": str(round(lec_part + prac_part + srs_part, 2)).replace('.', ','), "lec": str(lec_part), "prac": str(prac_part), "lab": "", "pkr": "", "srs": str(srs_part).replace('.', ',')},
-        {"name": f"Раздел 3. Прикладные технологии и аналитические методы", "total": str(round(lec_part + prac_part + srs_part, 2)).replace('.', ','), "lec": str(lec_part), "prac": str(prac_part), "lab": "", "pkr": "", "srs": str(srs_part).replace('.', ',')},
-        {"name": f"Раздел 4. Проектные решения, оценка эффективности и перспективы развития", "total": str(round(lec_part + prac_part + srs_part, 2)).replace('.', ','), "lec": str(lec_part), "prac": str(prac_part), "lab": "", "pkr": "", "srs": str(srs_part).replace('.', ',')}
-    ]
-
-    detailed_sections = [
-        {"title": s["name"], "themes": [{"title": f"Тема {i+1}.1. Основные понятия и актуальные задачи направления", "text": f"Теоретические аспекты курса {disc.get('name')}."}]}
-        for i, s in enumerate(sections)
-    ]
-
-    t4_sections = [
-        {
-            "num": str(i + 1),
-            "title": s["name"],
-            "lessons": [
-                {"theme": f"Тема {i+1}.1", "title": f"Лекция № {i+1}. Основы темы {i+1}", "competencies": comps[0]['code'] if comps else "УК-1", "control": "Устный опрос", "hours": str(lec_part)},
-                {"theme": f"Тема {i+1}.1", "title": f"Практикум № {i+1}. Практические расчеты и анализ", "competencies": comps[0]['code'] if comps else "УК-1", "control": "Защита работы", "hours": str(prac_part)}
-            ]
-        }
-        for i, s in enumerate(sections)
-    ]
-
-    t5_sections = [
-        {
-            "num": str(i + 1),
-            "title": s["name"],
-            "themes": [{"name": f"Тема {i+1}.1", "questions": f"Самостоятельное изучение литературы и подготовка к практическим занятиям по разделу {i+1}."}]
-        }
-        for i, s in enumerate(sections)
-    ]
-
-    context = {
-        "institute": meta.get("institute", "Институт мелиорации, водного хозяйства и строительства имени А.Н. Костякова"),
-        "institute_short": "мелиорации, водного хозяйства и строительства имени А.Н. Костякова",
-        "department": disc.get("department", "Кафедра экологии"),
-        "department_name": disc.get("department", "экологии").replace("Кафедра ", "").strip(),
-        "department_head_status": "И.о. зав. кафедрой",
-        "department_head_fio": "М.В. Тихонова",
-        "director_fio": "Д.М. Бенин",
-        "course_code": disc.get("code", "Б1.В.ДВ.01.02"),
-        "course_name": disc.get("name", ""),
-        "direction_code": meta.get("direction_code", "21.04.02"),
-        "direction_name": meta.get("direction_name", "Землеустройство и кадастры"),
-        "profile": meta.get("profile", "Цифровые технологии в землеустройстве агроландшафтов"),
-        "qualification": meta.get("qualification", "магистр"),
-        "qualification_plural": "магистров" if "магистр" in meta.get("qualification", "").lower() else "бакалавров",
-        "course_year": course_year,
-        "semester": str(sem),
-        "semester_phrase": f"{sem} семестре",
-        "study_form": meta.get("study_form", "очная"),
-        "start_year": meta.get("start_year", "2026"),
-        "current_year": "2026",
-        "developers_list": [
-            {"label": "Разработчик", "position": "преподаватель кафедры", "fio_rank": "Преподаватель И.И., к.н., доцент"}
-        ],
-        "developer_fio_rank": "Преподаватель И.И., к.н., доцент",
-        "reviewer_fio_rank": "Борисов Б.А., д.б.н., профессор кафедры почвоведения, геологии и ландшафтоведения",
-        "reviewer_fio_rank_full": "Борисовым Борисом Анорьевичем, доктором биологических наук, профессором",
-        "block_part": "части, формируемой участниками образовательных отношений, Блока 1 «Дисциплины (модули)»" if "ДВ" in disc.get("code", "") else "обязательной части Блока 1",
-        "block_part_genitive": "части, формируемой участниками образовательных отношений",
-        "total_zet": zet,
-        "total_hours": hours_total,
-        "contact_hours": hours_contact,
-        "contact_auditory_hours": str(h_lec_int + h_prac_int),
-        "lecture_hours": hours_lec,
-        "practical_hours": hours_prac,
-        "lab_hours": hours_lab,
-        "course_project_hours": "",
-        "exam_consultation_hours": "",
-        "kra_hours": hours_control,
-        "srs_hours": hours_srs,
-        "srs_self_hours": hours_srs,
-        "essay_hours": "",
-        "course_project_prep_hours": "",
-        "rgr_hours": "",
-        "test_work_hours": "",
-        "exam_control_hours": "",
-        "credit_control_hours": "",
-        "control_form": control_form_lower,
-        "control_form_genitive": control_gen,
-        "control_phrase": f"{control_form_lower} в {sem} семестре",
-        "sem_1_hdr": f"№{sem}",
-        "sem_1_total_hours": hours_total,
-        "sem_1_contact_hours": hours_contact,
-        "sem_1_contact_auditory_hours": str(h_lec_int + h_prac_int),
-        "sem_1_lecture_hours": hours_lec,
-        "sem_1_practical_hours": hours_prac,
-        "sem_1_lab_hours": hours_lab,
-        "sem_1_course_project_hours": "",
-        "sem_1_exam_consultation_hours": "",
-        "sem_1_kra_hours": hours_control,
-        "sem_1_srs_hours": hours_srs,
-        "sem_1_essay_hours": "",
-        "sem_1_course_project_prep_hours": "",
-        "sem_1_rgr_hours": "",
-        "sem_1_test_work_hours": "",
-        "sem_1_srs_self_hours": hours_srs,
-        "sem_1_exam_control_hours": "",
-        "sem_1_credit_control_hours": "",
-        "sem_2_hdr": "",
-        "sem_2_total_hours": "",
-        "sem_2_contact_hours": "",
-        "sem_2_contact_auditory_hours": "",
-        "sem_2_lecture_hours": "",
-        "sem_2_practical_hours": "",
-        "sem_2_lab_hours": "",
-        "sem_2_course_project_hours": "",
-        "sem_2_exam_consultation_hours": "",
-        "sem_2_kra_hours": "",
-        "sem_2_srs_hours": "",
-        "sem_2_essay_hours": "",
-        "sem_2_course_project_prep_hours": "",
-        "sem_2_rgr_hours": "",
-        "sem_2_test_work_hours": "",
-        "sem_2_srs_self_hours": "",
-        "sem_2_exam_control_hours": "",
-        "sem_2_credit_control_hours": "",
-        "competencies_count": str(len(comps)),
-        "competencies_short_list": ", ".join(c["code"] for c in comps),
-        "competencies_list": ", ".join(c["code"] for c in comps),
-        "competencies_nested": nested_comps,
-        "course_purpose": f"Формирование у обучающихся системы теоретических знаний и практических навыков по дисциплине «{disc.get('name')}».",
-        "prerequisites_text": "Дисциплины базовой и обязательной части предыдущих семестров",
-        "postrequisites_text": "Последующие дисциплины образовательной программы и государственная итоговая аттестация",
-        "corequisites_text": ", ".join(coreqs) if coreqs else "Дисциплины учебного плана текущего семестра",
-        "course_features_text": "практико-ориентированный характер дисциплины с применением современных образовательных технологий",
-        "course_annotation_content": f"Курс «{disc.get('name')}» направлен на углубленное изучение теоретических и прикладных основ профессиональной деятельности.",
-        "sections": sections,
-        "detailed_sections": detailed_sections,
-        "t4_sections": t4_sections,
-        "t5_sections": t5_sections,
-        "interactive_items": [
-            {"num": "1", "theme": "Раздел 1", "form": "Лекция", "tech": "Интерактивная лекция-дискуссия"},
-            {"num": "2", "theme": "Раздел 2", "form": "Практикум", "tech": "Кейс-метод и разбор ситуационных задач"}
-        ],
-        "assessment_materials_intro": f"Фонд оценочных средств дисциплины «{disc.get('name')}» предназначен для оценки сформированности заявленных компетенций.",
-        "individual_tasks_intro": "Индивидуальные задания направлены на закрепление практических навыков.",
-        "individual_tasks_list": [
-            {"label_num": "1. ", "text": f"Анализ типовых практических ситуаций по дисциплине «{disc.get('name')}»."},
-            {"label_num": "2. ", "text": "Разработка расчетно-аналитического проекта по профилю курса."}
-        ],
-        "practical_works_list": [
-            {
-                "num": "1",
-                "title": f"Практикум 1. Основы анализа данных по курсу «{disc.get('name')}»",
-                "case_desc": "Выполнить типовые расчеты и сформировать отчет.",
-                "questions": [{"label_num": "1. ", "text": "Какие основные факторы учитываются при расчете?"}]
-            }
-        ],
-        "test_questions_list": [
-            {
-                "label_num": "1. ",
-                "question": f"Что является основным предметом изучения дисциплины «{disc.get('name')}»?",
-                "a": "Теоретические и прикладные аспекты профессиональной области (+)",
-                "b": "Общие гуманитарные дисциплины",
-                "c": "Исключительно нормативно-правовая база",
-                "d": "История развития науки"
-            }
-        ],
-        "oral_questions_list": [
-            {"label_num": "1. ", "text": f"Теоретические основы и терминологический аппарат дисциплины «{disc.get('name')}»."},
-            {"label_num": "2. ", "text": "Методы практического анализа и решения профессиональных задач."}
-        ],
-        "colloquium_questions_list": [
-            {"label_num": "1. ", "text": "Современные направления развития и передовой опыт в предметной области."}
-        ],
-        "exam_credit_questions_list": [
-            {"label_num": "1. ", "text": f"Понятие, цели и задачи дисциплины «{disc.get('name')}»."},
-            {"label_num": "2. ", "text": "Нормативно-правовое и научно-методическое обеспечение предметной области."},
-            {"label_num": "3. ", "text": "Практические методы решения профессиональных задач."}
-        ],
-        "criteria": [
-            {"grade": "Отлично", "points": "85–100", "description": "Глубокое и системное знание предмета, безупречное выполнение практических работ.", "competency_level": "Высокий"},
-            {"grade": "Хорошо", "points": "70–84", "description": "Твердое знание материала с несущественными погрешностями.", "competency_level": "Базовый"},
-            {"grade": "Удовлетворительно", "points": "50–69", "description": "Пороговое освоение материала, наличие неточностей.", "competency_level": "Пороговый"},
-            {"grade": "Не зачтено", "points": "0–49", "description": "Материал не освоен, компетенции не сформированы.", "competency_level": "Не сформированы"}
-        ],
-        "current_assessment_forms": "устный опрос, тестирование, коллоквиум, защита практических работ",
-        "main_lit_count": "2",
-        "add_lit_count": "2",
-        "internet_lit_count": "3",
-        "main_literature_list": [
-            "Основная учебная литература по направлению подготовки из ЭБС «Лань» и «Юрайт» (2022–2025 гг.).",
-            "Специализированные профильные учебники и учебные пособия для высшей школы."
-        ],
-        "additional_literature_list": [
-            "Научные статьи в профильных рецензируемых журналах.",
-            "Справочные издания и отраслевые стандарты."
-        ],
-        "regulatory_acts_list": [
-            "Федеральный закон «Об образовании в РФ» от 29.12.2012 № 273-ФЗ.",
-            "Соответствующий Федеральный государственный образовательный стандарт (ФГОС ВО)."
-        ],
-        "methodological_guidelines_list": [
-            "Методические указания к практическим занятиям и самостоятельной работе студентов."
-        ],
-        "internet_resources_list": [
-            "Электронная библиотечная система «Лань»: https://e.lanbook.com",
-            "Электронная библиотечная система «Юрайт»: https://urait.ru",
-            "Официальный сайт университета: https://www.timacad.ru"
-        ],
-        "software_items": [
-            {"num": "1", "name": "Операционная система общего назначения (Astra Linux / Windows)", "license": "Образовательная лицензия"},
-            {"num": "2", "name": "Офисный пакет (МойОфис / LibreOffice)", "license": "Академическая лицензия / Свободное ПО"}
-        ],
-        "facilities": [
-            {"num": "1", "name": "Аудитория для лекционных занятий", "equipment": "Мультимедиа-проектор, экран, ПК преподавателя с подключением к ЭИОС."},
-            {"num": "2", "name": "Компьютерный класс для практических занятий", "equipment": "Рабочие станции с выходом в Интернет и доступом в ЭБС."}
-        ],
-        "teacher_guidelines": "Рекомендуется ориентировать занятия на практические кейсы и самостоятельную работу обучающихся.",
-        "student_guidelines": "Обучающимся рекомендуется регулярно изучать литературу и выполнять практические задания.",
-        "missed_classes_text": "Пропущенные занятия отрабатываются в установленном порядке в часы консультаций преподавателя."
-    }
-
-    return context

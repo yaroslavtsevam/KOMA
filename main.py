@@ -14,7 +14,8 @@ load_dotenv()
 from google.adk.agents import SequentialAgent, LoopAgent, LlmAgent
 from google.adk.runners import InMemoryRunner
 from google.genai import types
-from schemas.omd_schema import OmdDataSchema
+from google import genai
+from schemas.omd_schema import OmdDataSchema, OmdQuestionsPatchSchema, ActivityQuestionsItem
 
 # Configure logging to console
 logging.basicConfig(
@@ -23,6 +24,8 @@ logging.basicConfig(
     stream=sys.stdout
 )
 logger = logging.getLogger("PipelineCore")
+
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
 
 # Validate the API key setup
 if not os.environ.get("GOOGLE_API_KEY"):
@@ -37,6 +40,7 @@ from tools.docx_generator_tool import (
 )
 from tools.rpd_generator_tool import generate_rpd_for_project
 from tools.rpd_to_omd_adapter import rpd_context_to_omd_variables
+from tools.rpd_ai_generator import generate_rpd_content_via_ai, dump_rpd_variables_to_cli
 from rpd_app.core.curriculum_parser import CurriculumParser
 from agents.analyzer_agent import analyzer_agent
 from agents.critic_agent import critic_agent
@@ -64,7 +68,7 @@ def load_env_defaults():
                     defaults[k.strip()] = v.strip()
     return defaults
 
-def load_project_parameters(project_name, processing_dir, cli_args=None):
+def load_project_parameters(project_name, processing_dir, cli_args=None, extra_cli_params=None):
     defaults = load_env_defaults()
     project_env_path = os.path.join(processing_dir, "parameters.env")
     
@@ -84,6 +88,11 @@ def load_project_parameters(project_name, processing_dir, cli_args=None):
             val = getattr(cli_args, k, None)
             if val is not None:
                 project_params[k] = str(val)
+
+    if extra_cli_params:
+        for k, val in extra_cli_params.items():
+            if val is not None:
+                project_params[k] = str(val)
                 
     # Save the updated parameters to parameters.env
     os.makedirs(processing_dir, exist_ok=True)
@@ -98,11 +107,9 @@ def load_project_parameters(project_name, processing_dir, cli_args=None):
         for k, v in project_params.items():
             f.write(f"{k}={v}\n")
             
-    # Merge and return
-    merged = {}
-    for k, default_val in defaults.items():
-        user_val = project_params.get(k)
-        merged[k] = user_val if user_val is not None else default_val
+    # Merge and return all active parameters
+    merged = dict(defaults)
+    merged.update(project_params)
     return merged
 
 
@@ -156,7 +163,7 @@ async def run_extract_structure_step(project_name: str, params: dict, regenerate
     # Build structural analyzer agent
     structural_analyzer = LlmAgent(
         name="StructuralAnalyzer",
-        model="gemini-2.5-flash",
+        model=DEFAULT_GEMINI_MODEL,
         output_schema=OmdDataSchema,
         output_key="omd_json_data",
         instruction="""
@@ -180,7 +187,7 @@ async def run_extract_structure_step(project_name: str, params: dict, regenerate
     
     structural_critic = LlmAgent(
         name="StructuralCritic",
-        model="gemini-2.5-flash",
+        model=DEFAULT_GEMINI_MODEL,
         instruction="""
         You are the StructuralCriticAgent. Your job is to validate the structured JSON data stored in 'omd_json_data'
         against the raw syllabus content in 'rpd_content'.
@@ -267,178 +274,184 @@ async def run_generate_questions_step(project_name: str, params: dict, regenerat
     processing_dir = os.path.join("processing", project_name)
     output_markdown_path = os.path.join(processing_dir, f"{project_name}_parsed.md")
     variables_path = os.path.join(processing_dir, "variables.yml")
+    rpd_ctx_file = os.path.join(processing_dir, "rpd_context.json")
     
-    if not os.path.exists(output_markdown_path):
-        # Auto-synthesize markdown syllabus representation if coming from curriculum/RPD pipeline
-        rpd_ctx_file = os.path.join(processing_dir, "rpd_context.json")
-        if os.path.exists(rpd_ctx_file):
-            try:
-                with open(rpd_ctx_file, "r", encoding="utf-8") as f:
-                    rpd_ctx = json.load(f)
-                lines = [
-                    f"# Дисциплина: {rpd_ctx.get('course_name')}",
-                    f"Код: {rpd_ctx.get('course_code')}",
-                    f"Направление: {rpd_ctx.get('direction_code')} {rpd_ctx.get('direction_name')}",
-                    f"Профиль: {rpd_ctx.get('profile')}",
-                    "",
-                    "## Разделы и темы:"
-                ]
-                for s in rpd_ctx.get("sections", []):
-                    lines.append(f"- {s.get('name')}")
-                for ts in rpd_ctx.get("t4_sections", []):
-                    for les in ts.get("lessons", []):
-                        lines.append(f"  - {les.get('title')}: {les.get('theme')}")
-                rpd_content = "\n".join(lines)
-                with open(output_markdown_path, "w", encoding="utf-8") as f:
-                    f.write(rpd_content)
-                logger.info("Synthesized parsed markdown from rpd_context.json")
-            except Exception as e:
-                logger.warning(f"Failed to synthesize markdown from rpd_context.json: {e}")
-                rpd_content = f"Course: {project_name}"
-        elif os.path.exists(variables_path):
-            try:
-                with open(variables_path, "r", encoding="utf-8") as f:
-                    vdata = yaml.safe_load(f) or {}
-                rpd_content = f"# Course: {vdata.get('course_title')}\nCode: {vdata.get('course_code')}"
-                with open(output_markdown_path, "w", encoding="utf-8") as f:
-                    f.write(rpd_content)
-            except Exception:
-                rpd_content = f"Course: {project_name}"
-        else:
-            raise FileNotFoundError(f"Neither parsed Markdown nor variables.yml found at {processing_dir}. Run prior steps first.")
-    else:
-        with open(output_markdown_path, "r", encoding="utf-8") as f:
-            rpd_content = f.read()
+    # 1. Load existing variables.yml
+    omd_json_data = {}
+    if os.path.exists(variables_path):
+        try:
+            with open(variables_path, "r", encoding="utf-8") as f:
+                omd_json_data = yaml.safe_load(f) or {}
+        except Exception as e:
+            logger.warning(f"Error loading {variables_path}: {e}")
 
-    if not os.path.exists(variables_path):
-        raise FileNotFoundError(f"variables.yml not found at {variables_path}. Run step 'extract_structure' or 'rpd_to_omd' first.")
-        
-    with open(variables_path, "r", encoding="utf-8") as f:
-        omd_json_data = yaml.safe_load(f)
-        
-    # If variables already have questions and regenerate is False, skip
-    has_questions = False
-    if omd_json_data:
-        acts = omd_json_data.get("activities", [])
-        if acts and any(a.get("questions") for a in acts):
-            has_questions = True
-            
-    if has_questions and not regenerate:
-        logger.info(f"Questions already generated in variables.yml and regenerate=False. Skipping.")
-        return {"status": "success", "message": "Questions already exist in variables.yml"}
-        
-    # Build questions generator agent
-    questions_generator = LlmAgent(
-        name="QuestionsGenerator",
-        model="gemini-2.5-flash",
-        output_schema=OmdDataSchema,
-        output_key="omd_json_data",
-        instruction="""
-        You are the QuestionsGeneratorAgent. Your job is to take the existing course structure (metadata, competency tables, and activities schedule) provided in 'omd_json_data', read the raw syllabus text in 'rpd_content', and generate/populate all evaluation questions and tasks.
-        
-        CRITICAL PRESERVATION RULE:
-        - Do NOT change or alter structural metadata (course_type, course_title, course_code, start_year, etc.) or competency tables (table1, table2) from 'omd_json_data'.
-        
-        Your task is to:
-        1. Lesson Questions ('activities'):
-           - For EACH activity in 'activities': generate a list of high-quality, academic questions in Russian matching the topic and competencies.
-           - The number of questions for each lecture, seminar, and practical lesson must match 'seminar_questions_number' (default 15).
-           - Populate them in the activity's 'questions' field.
-        2. Colloquium ('colloquium'):
-           - In 'colloquium.sections': populate sections covering the course modules, each with a list of questions matching 'other_questions_number'.
-           - In 'colloquium.criteria': provide standard grading criteria (grades 5, 4, 3, 2).
-        3. Test Paper ('test_paper'):
-           - In 'test_paper.topics[0].variants[0].tasks': generate exactly 'test_questions_number' (default 15) test questions with variant options and answer indicators.
-           - In 'test_paper.criteria': provide grading percentage criteria.
-        4. Intermediate Assessment ('credit' and/or 'exam'):
-           - In 'exam.questions' (if exam is active): generate 'control_questions_number' (default 15) exam questions and set 'exam.criteria'.
-           - In 'credit.questions' (if credit is active): generate 'control_questions_number' (default 15) credit questions and set 'credit.criteria'.
-        5. Projects and Case Studies:
-           - In 'creative_project.individual_projects': generate project topics matching 'project_questions_number' (default 15) and set 'creative_project.criteria'.
-           - In 'case_study.tasks': generate case study tasks (e.g. 15) and set 'case_study.criteria'.
-        6. Format the final output strictly according to the OmdDataSchema.
-        """
-    )
-    
-    questions_critic = LlmAgent(
-        name="QuestionsCritic",
-        model="gemini-2.5-flash",
-        instruction="""
-        You are the QuestionsCriticAgent. Validate that questions in 'omd_json_data' are populated:
-        1. Are questions populated for activities?
-        2. Are tasks populated for active evaluation tools (test_paper, exam or credit, case_study, creative_project, colloquium)?
-        
-        If questions are populated across activities and assessment tools, CALL the 'exit_loop' tool IMMEDIATELY.
-        Only if major sections are completely empty or missing should you provide critique.
-        """,
-        tools=[exit_loop]
-    )
-    
-    questions_loop = LoopAgent(
-        name="QuestionsGenerationLoop",
-        sub_agents=[questions_generator, questions_critic],
-        max_iterations=2,
-    )
-    
-    runner = InMemoryRunner(agent=questions_loop)
-    runner.auto_create_session = True
-    session_id = f"questions_session_{project_name}"
-    
-    query = types.Content(
-        role="user",
-        parts=[types.Part(text=(
-            f"Generate questions for project '{project_name}' based on the provided structure and parameters.\n\n"
-            f"--- Parameters ---\n"
-            f"{json.dumps(params, indent=2, ensure_ascii=False)}\n\n"
-            f"--- Existing Structure (omd_json_data) ---\n"
-            f"{json.dumps(omd_json_data, indent=2, ensure_ascii=False)}\n\n"
-            f"--- Raw Syllabus Markdown Context (rpd_content) ---\n"
-            f"{rpd_content}"
-        ))],
-    )
-    
-    state_delta = {
-        "project_name": project_name,
-        "rpd_content": rpd_content,
-        "omd_json_data": omd_json_data,
-        **{k: (int(v) if k.endswith("_number") else v) for k, v in params.items()},
-    }
-    
-    async def _run_questions_loop():
-        async for event in runner.run_async(
-            user_id="system_user",
-            session_id=session_id,
-            new_message=query,
-            state_delta=state_delta,
-        ):
-            source = getattr(event, 'source', 'System')
-            print(f"\n>>> [{source} Event]")
-            if hasattr(event, 'content') and event.content:
-                parts = getattr(event.content, 'parts', []) or []
-                for part in parts:
-                    text = getattr(part, 'text', '')
-                    if text:
-                        print(text)
-            elif hasattr(event, 'tool_call') and event.tool_call:
-                print(f"Calling Tool: {getattr(event.tool_call, 'name')}")
+    # 2. If rpd_context.json exists, harmonize structure & import assessment tasks
+    if os.path.exists(rpd_ctx_file):
+        try:
+            with open(rpd_ctx_file, "r", encoding="utf-8") as f:
+                rpd_ctx = json.load(f)
+            omd_json_data = rpd_context_to_omd_variables(rpd_ctx, omd_json_data, params=params)
+            logger.info("Harmonized variables.yml with rpd_context.json assessment tools.")
+        except Exception as e:
+            logger.warning(f"Could not adapt rpd_context.json: {e}")
 
-    try:
-        await asyncio.wait_for(_run_questions_loop(), timeout=600.0)
-    except asyncio.TimeoutError:
-        logger.warning("Questions generation hit timeout (10 min). Proceeding with generated state...")
-            
-    # Fetch final state and update variables.yml
-    session = await runner.session_service.get_session(app_name=runner.app_name, user_id="system_user", session_id=session_id)
-    omd_json_data = session.state.get("omd_json_data", {})
     if not omd_json_data:
-        raise RuntimeError("AI questions generation failed: omd_json_data is empty.")
-        
+        raise FileNotFoundError(f"Neither variables.yml nor rpd_context.json found at {processing_dir}. Run prior steps first.")
+
+    acts = omd_json_data.get("activities", [])
+    has_questions = bool(acts and any(a.get("questions") for a in acts))
+    if has_questions and not regenerate:
+        logger.info("Questions already exist in variables.yml and regenerate=False. Skipping.")
+        return {"status": "success", "message": "Questions already exist in variables.yml"}
+
+    # 3. Generate questions via Google Gemini API (focused patch schema)
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if api_key and acts:
+        try:
+            client = genai.Client(api_key=api_key)
+            model_name = DEFAULT_GEMINI_MODEL
+
+            # Extract activities summary
+            acts_summary = [
+                {
+                    "num": a.get("num", f"Занятие {i+1}"),
+                    "theme": a.get("theme", ""),
+                    "type": a.get("type", "Лекция"),
+                    "comp_code": a.get("comp_code", "")
+                }
+                for i, a in enumerate(acts)
+            ]
+
+            # Determine assessment tools needing generation
+            needed_tools = []
+            if not omd_json_data.get("colloquium") or regenerate: needed_tools.append("colloquium (коллоквиум)")
+            if not omd_json_data.get("test_paper") or regenerate: needed_tools.append("test_paper (тестирование)")
+            if not omd_json_data.get("case_study") or regenerate: needed_tools.append("case_study (кейс-задания)")
+            if not omd_json_data.get("creative_project") or regenerate: needed_tools.append("creative_project (творческий проект)")
+            is_exam = "экзамен" in str(omd_json_data.get("course_type", "")).lower()
+            if is_exam:
+                if not omd_json_data.get("exam") or regenerate: needed_tools.append("exam (вопросы к экзамену)")
+            else:
+                if not omd_json_data.get("credit") or regenerate: needed_tools.append("credit (вопросы к зачету)")
+
+            prompt = f"""Ты — ведущий профессор и эксперт-методист РГАУ-МСХА имени К.А. Тимирязева.
+Твоя задача — сгенерировать академически глубокие, профессиональные оценочные материалы для фонда оценочных средств (ОМД).
+
+СВЕДЕНИЯ О ДИСЦИПЛИНЕ:
+- Наименование дисциплины: «{omd_json_data.get('course_title')}» (код: {omd_json_data.get('course_code')})
+- Направление подготовки: {omd_json_data.get('major_code')} {omd_json_data.get('major_title')}
+- Направленность (профиль): {omd_json_data.get('profile_title')}
+- Уровень образования: {omd_json_data.get('degree_type')}
+
+СЕТКА УЧЕБНЫХ ЗАНЯТИЙ:
+{json.dumps(acts_summary, ensure_ascii=False, indent=2)}
+
+ИНСТРУКЦИИ ПО ГЕНЕРАЦИИ:
+1. В поле 'activity_questions' для КАЖДОГО занятия сгенерируй от 3 до 5 контрольных вопросов для устного опроса и текущего контроля, строго привязанных к теме занятия и компетенциям.
+2. Для оценочных средств:
+   - В 'colloquium': 5-8 дискуссионных вопросов по ключевым разделам и критерии оценивания.
+   - В 'test_paper': 10-15 тестовых заданий с 4 нумерованными вариантами ответов (1), 2), 3), 4)) и ключом правильного ответа, плюс шкала оценивания. Форматируй каждое задание строго: предложение вопроса с двоеточием или знаком ?, новая строка, варианты ответа 1) ..., 2) ..., 3) ..., 4) ..., строка с ключом (Правильный ответ: [номер]).
+   - В 'case_study': 3-5 практических ситуационных кейс-задач с описанием производственной ситуации и критерии решения.
+   - В 'creative_project': 5-10 актуальных тем индивидуальных и групповых проектов с критериями защиты.
+   - В 'credit' или 'exam': 15-20 вопросов к промежуточной аттестации с критериями оценивания.
+
+Верни результат строго в формате JSON, соответствующем схеме OmdQuestionsPatchSchema.
+"""
+            print(f">>> [OMD Questions Event] Запуск генерации вопросов через Gemini ({model_name})...", flush=True)
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=OmdQuestionsPatchSchema,
+                    temperature=0.3
+                )
+            )
+
+            prompt_tokens = getattr(response.usage_metadata, "prompt_token_count", 0) or 0
+            cand_tokens = getattr(response.usage_metadata, "candidates_token_count", 0) or 0
+            total_tokens = getattr(response.usage_metadata, "total_token_count", 0) or (prompt_tokens + cand_tokens)
+            cost_usd = (prompt_tokens * 0.15 + cand_tokens * 0.60) / 1_000_000
+            cost_rub = cost_usd * 95.0
+            print(f">>> [OMD Questions Event] Вопросы получены! Токены: {total_tokens:,} (вход: {prompt_tokens:,}, выход: {cand_tokens:,}). Стоимость: ~{cost_rub:.2f} ₽ (${cost_usd:.5f})", flush=True)
+
+            patch_data = json.loads(response.text)
+            act_qs_map = {}
+            for item in patch_data.get("activity_questions", []):
+                k = (item.get("num") or "").strip().lower()
+                if k and item.get("questions"):
+                    act_qs_map[k] = item["questions"]
+
+            # Merge questions into activities
+            for idx, a in enumerate(acts):
+                num_k = (a.get("num") or "").strip().lower()
+                matched_qs = act_qs_map.get(num_k)
+                if not matched_qs and idx < len(patch_data.get("activity_questions", [])):
+                    matched_qs = patch_data["activity_questions"][idx].get("questions")
+                if matched_qs:
+                    a["questions"] = matched_qs
+
+            # Merge assessment tools
+            for tool_key in ["colloquium", "test_paper", "case_study", "creative_project", "credit", "exam"]:
+                if patch_data.get(tool_key):
+                    omd_json_data[tool_key] = patch_data[tool_key]
+
+        except Exception as e:
+            logger.warning(f"AI question generation failed or hit error: {e}. Falling back to synthesized questions...")
+
+    # 4. Fallback synthesis for any activity that still lacks questions
+    for idx, a in enumerate(omd_json_data.get("activities", [])):
+        if not a.get("questions"):
+            theme = a.get("theme") or a.get("num") or f"Занятие {idx+1}"
+            a["questions"] = [
+                f"Раскройте теоретические основы и понятийный аппарат темы «{theme}».",
+                f"Каковы ключевые методы и алгоритмы, применяемые в рамках темы «{theme}»?",
+                f"Приведите практический пример реализации решений по теме «{theme}»."
+            ]
+
     data = clean_dict_hyphenations(omd_json_data)
     data = clean_question_prefixes(data)
-    
+
     with open(variables_path, "w", encoding="utf-8") as f:
         yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-        
+
+    # 5. CLI Output of generated variables summary
+    print("\n" + "=" * 80)
+    print(f"  ДАМП СГЕНЕРИРОВАННЫХ ОЦЕНОЧНЫХ МАТЕРИАЛОВ (ОМД): {project_name}")
+    print("=" * 80)
+    print(f"Дисциплина: {data.get('course_title')} ({data.get('course_code')})")
+    print(f"Учебных занятий в сетке: {len(data.get('activities', []))}")
+    for idx, a in enumerate(data.get("activities", [])[:4], 1):
+        print(f"  {idx}. [{a.get('type')}] {a.get('num')}: {len(a.get('questions', []))} вопр.")
+        for q in a.get("questions", [])[:2]:
+            print(f"     • {q}")
+    if len(data.get("activities", [])) > 4:
+        rem_count = len(data.get("activities", [])) - 4
+        print(f"  ... и еще {rem_count} занятий с вопросами.")
+
+    print("\nФОНД ОЦЕНОЧНЫХ СРЕДСТВ:")
+    colloq = data.get("colloquium")
+    if colloq:
+        q_cnt = sum(len(s.get("questions", [])) for s in colloq.get("sections", []))
+        print(f"  - Коллоквиум: {q_cnt} вопросов")
+    test_p = data.get("test_paper")
+    if test_p:
+        t_cnt = sum(len(v.get("tasks", [])) for top in test_p.get("topics", []) for v in top.get("variants", []))
+        print(f"  - Тестовые задания: {t_cnt} заданий")
+    case_s = data.get("case_study")
+    if case_s:
+        print(f"  - Практические кейсы: {len(case_s.get('tasks', []))} кейсов")
+    creat_p = data.get("creative_project")
+    if creat_p:
+        print(f"  - Творческие проекты: {len(creat_p.get('individual_projects', []))} инд. / {len(creat_p.get('group_projects', []))} групп.")
+    cred = data.get("credit")
+    if cred:
+        print(f"  - Вопросы к зачету: {len(cred.get('questions', []))} вопросов")
+    ex = data.get("exam")
+    if ex:
+        print(f"  - Вопросы к экзамену: {len(ex.get('questions', []))} вопросов")
+    print("=" * 80 + "\n")
+
     logger.info(f"Saved completed variables.yml with questions to {variables_path}")
     return {"status": "success", "message": f"Saved questions to {variables_path}"}
 
@@ -480,6 +493,8 @@ def run_generate_docx_step(project_name: str, params: dict, regenerate: bool = F
     
     res = docx_generator_tool(MockToolContext(state))
     logger.info(f"Step 4 Complete: {res}")
+    if res.get("status") == "error":
+        raise RuntimeError(f"Docx generation failed: {res.get('message')}")
     return res
 
 
@@ -533,17 +548,110 @@ def run_parse_plan_step(project_name: str, plan_path: str = None) -> dict:
     return data
 
 
+def run_generate_rpd_content_step(project_name: str, plan_path: str = None, course_query: str = None, params: dict = None, regenerate: bool = False) -> dict:
+    """Generates rich AI RPD content (ZUV, dynamic sections, FOS, literature, software) via Gemini API."""
+    logger.info(f"--- Running Step: Generate RPD AI Content for project '{project_name}' ---")
+    proc_dir = os.path.join("processing", project_name)
+    os.makedirs(proc_dir, exist_ok=True)
+    proc_context_path = os.path.join(proc_dir, "rpd_context.json")
+
+    if os.path.exists(proc_context_path) and not regenerate:
+        try:
+            with open(proc_context_path, "r", encoding="utf-8") as f:
+                existing_ctx = json.load(f)
+            has_substance = bool(
+                existing_ctx.get("token_usage") or
+                (existing_ctx.get("t4_sections") and sum(len(s.get("lessons", [])) for s in existing_ctx.get("t4_sections", [])) >= 10)
+            )
+            if has_substance:
+                logger.info(f"rpd_context.json already exists for '{project_name}' with substantive content. Skipping AI call.")
+                dump_rpd_variables_to_cli(existing_ctx)
+                return {"status": "success", "context": existing_ctx}
+        except Exception:
+            pass
+
+    plan_file = _find_plan_file(project_name, plan_path)
+    if not plan_file or not os.path.exists(plan_file):
+        raise FileNotFoundError(f"Curriculum plan PDF not found for project '{project_name}'. Provide --plan.")
+
+    query = course_query
+    if not query and params:
+        query = params.get("course_code") or params.get("course_name")
+    if not query and os.path.exists(proc_context_path):
+        try:
+            with open(proc_context_path, "r", encoding="utf-8") as f:
+                old_c = json.load(f)
+                query = old_c.get("course_code") or old_c.get("course_name")
+        except Exception:
+            pass
+    if not query:
+        query = project_name
+
+    parser = CurriculumParser(plan_file)
+    meta = parser.extract_metadata()
+    disc = parser.extract_discipline_details(query)
+    sem = disc["semesters"][0] if disc.get("semesters") else 1
+    coreqs = parser.extract_corequisites(sem, disc.get("code", ""))
+
+    comps = None
+    if os.path.exists(proc_context_path):
+        try:
+            with open(proc_context_path, "r", encoding="utf-8") as f:
+                saved_ctx = json.load(f)
+            if saved_ctx.get("user_verified_competencies") and saved_ctx.get("competencies_nested"):
+                user_codes = saved_ctx.get("competency_codes") or [c["code"] for c in saved_ctx["competencies_nested"]]
+                comps = parser.extract_competency_details(user_codes)
+        except Exception:
+            pass
+    if not comps:
+        comps = parser.extract_competency_details(disc.get("competency_codes", []))
+
+    context = generate_rpd_content_via_ai(meta, disc, comps, coreqs)
+
+    with open(proc_context_path, "w", encoding="utf-8") as f:
+        json.dump(context, f, indent=2, ensure_ascii=False)
+
+    results_dir = os.path.join("results", project_name, "teach_plan")
+    os.makedirs(results_dir, exist_ok=True)
+    with open(os.path.join(results_dir, "rpd_context.json"), "w", encoding="utf-8") as f:
+        json.dump(context, f, indent=2, ensure_ascii=False)
+
+    logger.info(f"RPD AI content successfully generated and saved to {proc_context_path}")
+
+    # Stream all generated variables to CLI / stdout
+    dump_rpd_variables_to_cli(context)
+
+    # Immediately compile fresh DOCX document so it matches the generated AI content
+    try:
+        logger.info(f"Automatically compiling fresh RPD DOCX document for '{project_name}'...")
+        run_generate_rpd_step(project_name, plan_path=plan_file, course_query=query, params=params)
+    except Exception as e:
+        logger.warning(f"Could not automatically compile DOCX after RPD AI generation: {e}")
+
+    return {"status": "success", "context": context}
+
+
 def run_generate_rpd_step(project_name: str, plan_path: str = None, course_query: str = None, params: dict = None) -> dict:
     """Generates 100% compliant RPD DOCX using 14 formatting rules."""
     logger.info(f"--- Running Step: Generate RPD for project '{project_name}' ---")
-    plan_file = _find_plan_file(project_name, plan_path)
+    proc_dir = os.path.join("processing", project_name)
+    proc_context_path = os.path.join(proc_dir, "rpd_context.json")
     
-    query = course_query
-    if not query and params:
-        query = params.get("course_name") or params.get("course_code")
-    if not query:
-        # Check if project name or curriculum has hint
-        query = project_name
+    custom_context = None
+    if os.path.exists(proc_context_path):
+        try:
+            with open(proc_context_path, "r", encoding="utf-8") as f:
+                custom_context = json.load(f)
+        except Exception:
+            custom_context = None
+
+    if not custom_context:
+        # Pre-generate rich AI content first
+        gen_res = run_generate_rpd_content_step(project_name, plan_path, course_query, params)
+        custom_context = gen_res.get("context")
+
+    plan_file = _find_plan_file(project_name, plan_path)
+    query = course_query or (params.get("course_code") or params.get("course_name") if params else None) or project_name
         
     results_dir = os.path.join("results", project_name)
     os.makedirs(results_dir, exist_ok=True)
@@ -552,13 +660,12 @@ def run_generate_rpd_step(project_name: str, plan_path: str = None, course_query
         project_name=project_name,
         plan_pdf_path=plan_file,
         course_name_or_code=query,
-        output_dir=results_dir
+        output_dir=results_dir,
+        custom_context=custom_context
     )
     
     # Save context copy to processing dir
-    proc_dir = os.path.join("processing", project_name)
     os.makedirs(proc_dir, exist_ok=True)
-    proc_context_path = os.path.join(proc_dir, "rpd_context.json")
     with open(proc_context_path, "w", encoding="utf-8") as f:
         json.dump(res["context"], f, indent=2, ensure_ascii=False)
         
@@ -613,6 +720,7 @@ async def main():
         choices=[
             "parse",
             "parse_plan",
+            "generate_rpd_content",
             "generate_rpd",
             "rpd_to_omd",
             "extract_structure",
@@ -633,13 +741,32 @@ async def main():
     for k in defaults.keys():
         parser.add_argument(f"--{k}", help=f"Override for parameter {k}")
         
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
     project_name = args.project
     step = args.step
     regenerate = args.regenerate
     
+    extra_cli_params = {}
+    i = 0
+    while i < len(unknown):
+        arg = unknown[i]
+        if arg.startswith("--"):
+            key = arg[2:]
+            if "=" in key:
+                k, v = key.split("=", 1)
+                extra_cli_params[k] = v
+                i += 1
+            elif i + 1 < len(unknown) and not unknown[i+1].startswith("--"):
+                extra_cli_params[key] = unknown[i+1]
+                i += 2
+            else:
+                extra_cli_params[key] = "true"
+                i += 1
+        else:
+            i += 1
+
     proc_dir = os.path.join("processing", project_name)
-    params = load_project_parameters(project_name, proc_dir, args)
+    params = load_project_parameters(project_name, proc_dir, args, extra_cli_params=extra_cli_params)
     if args.course:
         params["course_name"] = args.course
     
@@ -648,6 +775,8 @@ async def main():
             run_parse_step(project_name, regenerate)
         elif step == "parse_plan":
             run_parse_plan_step(project_name, args.plan)
+        elif step == "generate_rpd_content":
+            run_generate_rpd_content_step(project_name, args.plan, args.course, params, regenerate)
         elif step == "generate_rpd":
             run_generate_rpd_step(project_name, args.plan, args.course, params)
         elif step == "rpd_to_omd":
@@ -669,6 +798,7 @@ async def main():
             if has_plan:
                 logger.info("=== Running Unified Curriculum -> RPD -> OMD Pipeline ===")
                 run_parse_plan_step(project_name, args.plan)
+                run_generate_rpd_content_step(project_name, args.plan, args.course, params, regenerate)
                 run_generate_rpd_step(project_name, args.plan, args.course, params)
                 run_rpd_to_omd_step(project_name, params)
                 # Questions are populated via bridge; if AI questions requested, run questions step

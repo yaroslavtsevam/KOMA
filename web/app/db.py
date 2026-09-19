@@ -71,6 +71,8 @@ def init_db() -> None:
             ("project_files", "plan_path", "TEXT"),
             ("project_files", "rpd_path", "TEXT"),
             ("project_files", "omd_path", "TEXT"),
+            ("projects", "department", "TEXT"),
+            ("projects", "institute", "TEXT"),
         ]
         for tbl, col, coltype in columns_to_add:
             try:
@@ -154,17 +156,27 @@ def create_project(
     name: str,
     course_code: str = "",
     course_name: str = "",
-    plan_filename: str = ""
+    plan_filename: str = "",
+    department: str = "",
+    institute: str = ""
 ) -> int:
     with _connect() as conn:
         cur = conn.execute(
-            """INSERT INTO projects (user_id, name, course_code, course_name, plan_filename)
-               VALUES (?, ?, ?, ?, ?)""",
-            (user_id, name, course_code, course_name, plan_filename)
+            """INSERT INTO projects (user_id, name, course_code, course_name, plan_filename, department, institute)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (user_id, name, course_code, course_name, plan_filename, department, institute)
         )
         pid = cur.lastrowid
         conn.execute("INSERT INTO project_files (project_id) VALUES (?)", (pid,))
     return pid
+
+
+def update_project_department(project_id: int, department: str, institute: str = "") -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE projects SET department = ?, institute = ? WHERE id = ?",
+            (department, institute, project_id)
+        )
 
 
 def get_project(project_id: int) -> dict | None:
@@ -178,6 +190,18 @@ def get_project(project_id: int) -> dict | None:
             (project_id,),
         ).fetchone()
     return dict(row) if row else None
+
+
+def delete_project(project_id: int) -> dict | None:
+    """Deletes project and its linked records from DB, returning deleted project info."""
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not row:
+            return None
+        proj = dict(row)
+        conn.execute("DELETE FROM project_files WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    return proj
 
 
 def get_user_projects(user_id: int) -> list[dict]:

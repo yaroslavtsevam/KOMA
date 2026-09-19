@@ -16,6 +16,7 @@ from .db import (
     get_project,
     update_project_status,
     update_project_files,
+    update_project_meta,
     input_dir,
     processing_dir,
     results_dir,
@@ -169,6 +170,51 @@ async def _run_subprocess_step(
             return False
 
 
+# ── STEP RPD AI: Pre-generate RPD Context via AI ─────────────────────────────
+
+async def run_rpd_ai_pregeneration(
+    project_id: int,
+    username: str,
+    project_name: str,
+    plan_path: str,
+    course_name: str,
+    regenerate: bool = False
+) -> None:
+    """Pre-generates rich academic RPD content (ZUV, dynamic sections, FOS) via Gemini API."""
+    update_project_status(project_id, "generating_rpd_content")
+    try:
+        extra_args = []
+        if plan_path:
+            extra_args.extend(["--plan", str(plan_path)])
+        if course_name:
+            extra_args.extend(["--course", str(course_name)])
+
+        success = await _run_subprocess_step(
+            project_name=project_name,
+            step="generate_rpd_content",
+            regenerate=regenerate,
+            extra_args=extra_args
+        )
+        if not success:
+            raise RuntimeError("CLI generate_rpd_content step failed.")
+
+        # Update database with newly compiled DOCX if available
+        res_dir = results_dir(project_name)
+        docx_files = [f for f in res_dir.glob("*.docx") if not f.name.startswith("~$")]
+        if docx_files:
+            latest_docx = max(docx_files, key=lambda f: f.stat().st_mtime)
+            update_project_files(project_id, rpd_path=str(latest_docx))
+            update_project_meta(project_id, rpd_path=str(latest_docx))
+            logger.info("Project %s: Updated rpd_path to %s", project_id, latest_docx)
+
+        update_project_status(project_id, "rpd_ready")
+        logger.info("Project %s: Successfully pre-generated RPD AI content", project_id)
+
+    except Exception as exc:
+        logger.exception("RPD AI pregeneration failed for project %s", project_id)
+        update_project_status(project_id, "error", str(exc))
+
+
 # ── STEP RPD: Generate RPD ───────────────────────────────────────────────────
 
 async def run_rpd_generation(
@@ -270,8 +316,12 @@ async def run_rpd_to_omd_bridge(
                     existing_vars = yaml.safe_load(vf)
             except Exception:
                 pass
+        if params is None:
+            env_path = proc_dir / "parameters.env"
+            if env_path.exists():
+                params = read_parameters_env(env_path)
 
-        omd_data = rpd_context_to_omd_variables(rpd_ctx, existing_variables=existing_vars)
+        omd_data = rpd_context_to_omd_variables(rpd_ctx, existing_variables=existing_vars, params=params)
         with open(variables_path, "w", encoding="utf-8") as f:
             yaml.dump(omd_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
@@ -363,8 +413,8 @@ async def generate_docx(
         result_docx = res_dir / f"{project_name}_OMD_Generated.docx"
 
         success = await _run_subprocess_step(project_name, "generate_docx", params)
-        if not success:
-            raise RuntimeError("CLI generate_docx step failed.")
+        if not success or not result_docx.exists():
+            raise RuntimeError(f"CLI generate_docx step failed or file was not created at {result_docx}.")
 
         update_project_files(project_id, result_path=str(result_docx), omd_path=str(result_docx))
         from .db import update_project_meta

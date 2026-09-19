@@ -1,10 +1,13 @@
+import os
 from google.adk.agents import LlmAgent
 from tools.docling_parser_tool import docling_parser_tool
 
-# We use gemini-2.5-flash as the default reasoning model
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
+
+# We use gemini-3.7-flash as the default reasoning model
 parser_agent = LlmAgent(
     name="ParserAgent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are the ParserAgent. 
     Your sole task is to parse the PDF course syllabus using the 'docling_parser_tool'.
